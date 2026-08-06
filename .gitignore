@@ -1,0 +1,14 @@
+node_modules/
+.pnpm-store/
+.codex/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+.DS_Store
+.vite/
+playwright-report/
+test-results/

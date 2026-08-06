@@ -1,0 +1,90 @@
+name: srilankaol
+
+services:
+  database:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: srilanka
+      POSTGRES_PASSWORD: srilanka
+      POSTGRES_DB: srilanka_dev
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U srilanka -d srilanka_dev']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  object-storage:
+    image: minio/minio:latest
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: srilanka
+      MINIO_ROOT_PASSWORD: change-me-now
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - object-storage-data:/data
+
+  api:
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/api.Dockerfile
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://srilanka:srilanka@database:5432/srilanka_dev
+      REDIS_URL: redis://redis:6379/0
+      WEB_ORIGIN: http://localhost:5173
+      OBJECT_STORAGE_ENDPOINT: http://object-storage:9000
+      OBJECT_STORAGE_BUCKET: srilanka-dev
+      OBJECT_STORAGE_ACCESS_KEY: srilanka
+      OBJECT_STORAGE_SECRET_KEY: change-me-now
+    ports:
+      - '3000:3000'
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/worker.Dockerfile
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://srilanka:srilanka@database:5432/srilanka_dev
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/web.Dockerfile
+    ports:
+      - '5173:80'
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  redis-data:
+  object-storage-data:

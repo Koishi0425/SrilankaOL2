@@ -1,0 +1,17 @@
+{
+  "name": "@srilanka/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@srilanka/config": "workspace:*",
+    "@srilanka/logger": "workspace:*",
+    "redis": "^6.2.0"
+  }
+}

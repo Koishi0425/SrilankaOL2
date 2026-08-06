@@ -1,0 +1,23 @@
+{
+  "name": "@srilanka/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@srilanka/config": "workspace:*",
+    "@srilanka/contracts": "workspace:*",
+    "@srilanka/database": "workspace:*",
+    "@srilanka/logger": "workspace:*",
+    "fastify": "^5.11.2",
+    "redis": "^6.2.0"
+  }
+}
