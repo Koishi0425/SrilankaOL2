@@ -162,10 +162,12 @@ export async function fetchMapViewport(
   gameId: string,
   bounds: { minQ: number; maxQ: number; minR: number; maxR: number },
   signal?: AbortSignal,
+  previewMemberId?: string,
 ): Promise<MapViewportData> {
   const query = new URLSearchParams(
     Object.entries(bounds).map(([key, value]) => [key, String(value)]),
   );
+  if (previewMemberId) query.set('previewMemberId', previewMemberId);
   return (
     await apiRequest<MapViewportData>(
       `/games/${gameId}/map/viewport?${query}`,
@@ -179,18 +181,26 @@ export async function fetchMapViewport(
 export async function fetchTile(
   gameId: string,
   tileId: string,
+  previewMemberId?: string,
 ): Promise<TileDetails> {
-  return (await apiRequest<TileDetails>(`/games/${gameId}/tiles/${tileId}`))
-    .data;
+  const query = previewMemberId
+    ? `?previewMemberId=${encodeURIComponent(previewMemberId)}`
+    : '';
+  return (
+    await apiRequest<TileDetails>(`/games/${gameId}/tiles/${tileId}${query}`)
+  ).data;
 }
 
 export async function searchMap(
   gameId: string,
   query: string,
+  previewMemberId?: string,
 ): Promise<MapSearchResult[]> {
+  const parameters = new URLSearchParams({ q: query });
+  if (previewMemberId) parameters.set('previewMemberId', previewMemberId);
   return (
     await apiRequest<MapSearchResult[]>(
-      `/games/${gameId}/map/search?q=${encodeURIComponent(query)}`,
+      `/games/${gameId}/map/search?${parameters}`,
     )
   ).data;
 }

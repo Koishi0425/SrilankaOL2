@@ -208,6 +208,7 @@ function GameWorkspace({ game }: { game: GameSummary }) {
   const [role, setRole] = useState<'Player' | 'Observer'>('Player');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [previewMemberId, setPreviewMemberId] = useState('');
   const canManage = game.role === 'Host' || game.role === 'Administrator';
 
   const load = useCallback(async () => {
@@ -269,7 +270,37 @@ function GameWorkspace({ game }: { game: GameSummary }) {
       {error && <p className="form-error">{error}</p>}
       {!loading && (
         <>
-          <HexMap game={game} countries={countries} />
+          {canManage && (
+            <div className="preview-control">
+              <label>
+                玩家视角预览
+                <select
+                  value={previewMemberId}
+                  onChange={(event) => setPreviewMemberId(event.target.value)}
+                >
+                  <option value="">主持人真实视角</option>
+                  {members
+                    .filter((member) =>
+                      ['Player', 'Observer'].includes(member.role),
+                    )
+                    .map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.displayName} ·{' '}
+                        {member.controlledCountryName ?? member.role}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {previewMemberId && (
+                <strong>只读预览：当前页面严格按该成员权限显示</strong>
+              )}
+            </div>
+          )}
+          <HexMap
+            game={game}
+            countries={countries}
+            previewMemberId={previewMemberId || undefined}
+          />
           <div className="context-grid">
             <div>
               <h3>国家</h3>

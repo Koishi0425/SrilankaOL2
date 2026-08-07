@@ -90,6 +90,16 @@ describe('App', () => {
               controlledCountryId: null,
               controlledCountryName: null,
             },
+            {
+              id: '00000000-0000-4000-8000-000000000006',
+              userId: '00000000-0000-4000-8000-000000000007',
+              username: 'player',
+              displayName: 'Player',
+              role: 'Player',
+              status: 'Active',
+              controlledCountryId: '00000000-0000-4000-8000-000000000004',
+              controlledCountryName: 'Kandy',
+            },
           ],
           meta: { requestId: 'req_members' },
         });
@@ -129,6 +139,12 @@ describe('App', () => {
       screen.queryByRole('button', { name: '创建游戏' }),
     ).not.toBeInTheDocument();
     expect(await screen.findByText('成员管理')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('玩家视角预览'), {
+      target: { value: '00000000-0000-4000-8000-000000000006' },
+    });
+    expect(
+      screen.getByText('只读预览：当前页面严格按该成员权限显示'),
+    ).toBeInTheDocument();
   });
 
   it('registers a new user from the login panel', async () => {

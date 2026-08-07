@@ -123,28 +123,42 @@ export interface MapCityMarker {
   status: string;
 }
 
+export type DiscoveryState =
+  'Unknown' | 'Rumored' | 'Discovered' | 'Mapped' | 'Observed' | 'Outdated';
+
+export type ArmyStrengthKnowledge =
+  | { kind: 'Exact'; value: number }
+  | { kind: 'Range'; min: number; max: number }
+  | { kind: 'Unknown' };
+
 export interface MapArmyMarker {
   id: string;
-  name: string;
-  strength: number;
-  status: string;
-  countryId: string;
+  name: string | null;
+  strength: ArmyStrengthKnowledge;
+  status: string | null;
+  countryId: string | null;
+  confidence: number | null;
+  observedWorldVersion: number | null;
+  outdated: boolean;
 }
 
 export interface MapTileSummary {
   id: string;
   q: number;
   r: number;
-  terrainKey: string;
-  terrainName: string;
-  terrainColor: string;
+  discoveryState: DiscoveryState;
+  confidence: number | null;
+  observedWorldVersion: number | null;
+  terrainKey: string | null;
+  terrainName: string | null;
+  terrainColor: string | null;
   regionId: string | null;
   regionName: string | null;
   controllerCountryId: string | null;
   controllerCountryName: string | null;
   controllerColor: string | null;
-  passable: boolean;
-  movementCost: number;
+  passable: boolean | null;
+  movementCost: number | null;
   cities: MapCityMarker[];
   armies: MapArmyMarker[];
 }
@@ -153,6 +167,8 @@ export interface MapViewportData {
   mapId: string;
   worldVersion: number;
   bounds: { minQ: number; maxQ: number; minR: number; maxR: number };
+  viewMode: 'Truth' | 'Player' | 'Public' | 'Preview';
+  viewCountryId: string | null;
   tiles: MapTileSummary[];
 }
 
@@ -160,8 +176,8 @@ export interface TileDetails extends MapTileSummary {
   provinceName: string | null;
   legalOwnerCountryName: string | null;
   occupierCountryName: string | null;
-  elevation: number;
-  roadLevel: number;
+  elevation: number | null;
+  roadLevel: number | null;
   notes?: string;
 }
 

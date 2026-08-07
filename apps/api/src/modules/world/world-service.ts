@@ -12,6 +12,13 @@ import type {
 import type { DatabasePool } from '@srilanka/database';
 
 import { ApiFault } from '../../errors.js';
+import {
+  discoveryFor,
+  hideUnknownTile,
+  projectArmy,
+  type PerceivedArmyRow,
+  type ViewContext,
+} from './perception-service.js';
 
 interface TileRow {
   id: string;
@@ -27,15 +34,13 @@ interface TileRow {
   controller_color: string | null;
   passable: boolean;
   movement_cost: string;
+  discovery_state: MapTileSummary['discoveryState'] | null;
+  knowledge_confidence: number | null;
+  observed_world_version: string | null;
 }
 
 interface CityRow extends MapCityMarker {
   tile_id: string;
-}
-
-interface ArmyRow extends Omit<MapArmyMarker, 'countryId'> {
-  tile_id: string;
-  country_id: string;
 }
 
 export class WorldService {
@@ -66,6 +71,62 @@ export class WorldService {
         '该操作需要主持人权限。',
       );
     }
+  }
+
+  private async resolveView(
+    gameId: string,
+    userId: string,
+    previewMemberId?: string,
+  ): Promise<ViewContext> {
+    const actor = await this.database.query<{
+      role: 'Host' | 'Player' | 'Observer' | 'Administrator';
+      controlled_country_id: string | null;
+    }>(
+      `SELECT role, controlled_country_id FROM game_members
+       WHERE game_id = $1 AND user_id = $2 AND status = 'Active'`,
+      [gameId, userId],
+    );
+    const member = actor.rows[0];
+    if (!member) throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到该游戏。');
+    if (previewMemberId) {
+      if (member.role !== 'Host' && member.role !== 'Administrator') {
+        throw new ApiFault(
+          403,
+          'PLAYER_VIEW_PREVIEW_FORBIDDEN',
+          '只有主持人可以预览玩家视角。',
+        );
+      }
+      const target = await this.database.query<{
+        role: 'Host' | 'Player' | 'Observer' | 'Administrator';
+        controlled_country_id: string | null;
+      }>(
+        `SELECT role, controlled_country_id FROM game_members
+         WHERE game_id = $1 AND id = $2 AND status = 'Active'`,
+        [gameId, previewMemberId],
+      );
+      const preview = target.rows[0];
+      if (!preview)
+        throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到预览成员。');
+      return {
+        access:
+          preview.role === 'Player' && preview.controlled_country_id
+            ? 'Player'
+            : 'Public',
+        responseMode: 'Preview',
+        countryId: preview.controlled_country_id,
+      };
+    }
+    if (member.role === 'Host' || member.role === 'Administrator') {
+      return { access: 'Truth', responseMode: 'Truth', countryId: null };
+    }
+    if (member.role === 'Player' && member.controlled_country_id) {
+      return {
+        access: 'Player',
+        responseMode: 'Player',
+        countryId: member.controlled_country_id,
+      };
+    }
+    return { access: 'Public', responseMode: 'Public', countryId: null };
   }
 
   async initializeDevelopmentMap(
@@ -176,6 +237,37 @@ export class WorldService {
           [randomUUID(), gameId, primaryCountry, capitalTile],
         );
       }
+      await client.query(
+        `INSERT INTO country_tile_knowledge (
+           id, game_id, country_id, tile_id, discovery_state, confidence,
+           observed_world_version
+         )
+         SELECT gen_random_uuid(), c.game_id, c.id, t.id,
+                CASE WHEN t.controller_country_id = c.id THEN 'Observed' ELSE 'Mapped' END,
+                CASE WHEN t.controller_country_id = c.id THEN 100 ELSE 80 END,
+                CASE WHEN t.controller_country_id = c.id THEN g.current_world_version ELSE NULL END
+         FROM countries c JOIN games g ON g.id = c.game_id
+         JOIN hex_tiles t ON t.game_id = c.game_id
+         WHERE c.game_id = $1
+         ON CONFLICT (game_id, country_id, tile_id) DO NOTHING`,
+        [gameId],
+      );
+      await client.query(
+        `INSERT INTO country_army_intelligence (
+           id, game_id, country_id, army_id, perceived_name,
+           perceived_country_id, strength_min, strength_max, confidence,
+           observed_world_version
+         )
+         SELECT gen_random_uuid(), c.game_id, c.id, a.id, a.name, a.country_id,
+                FLOOR(a.strength * 0.75)::integer,
+                CEIL(a.strength * 1.25)::integer,
+                65, g.current_world_version
+         FROM countries c JOIN games g ON g.id = c.game_id
+         JOIN armies a ON a.game_id = c.game_id AND a.country_id <> c.id
+         WHERE c.game_id = $1
+         ON CONFLICT (game_id, country_id, army_id) DO NOTHING`,
+        [gameId],
+      );
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -222,12 +314,17 @@ export class WorldService {
   async getViewport(input: {
     gameId: string;
     userId: string;
+    previewMemberId?: string;
     minQ: number;
     maxQ: number;
     minR: number;
     maxR: number;
   }): Promise<MapViewportData> {
-    await this.requireMember(input.gameId, input.userId);
+    const view = await this.resolveView(
+      input.gameId,
+      input.userId,
+      input.previewMemberId,
+    );
     if ((input.maxQ - input.minQ + 1) * (input.maxR - input.minR + 1) > 2500) {
       throw new ApiFault(
         400,
@@ -241,14 +338,26 @@ export class WorldService {
         `SELECT t.id, t.q, t.r, tt.key AS terrain_key, tt.name AS terrain_name,
                 tt.color AS terrain_color, t.region_id, r.name AS region_name,
                 t.controller_country_id, c.name AS controller_country_name,
-                c.map_color AS controller_color, t.passable, t.movement_cost
+                c.map_color AS controller_color, t.passable, t.movement_cost,
+                ctk.discovery_state, ctk.confidence AS knowledge_confidence,
+                ctk.observed_world_version
          FROM hex_tiles t
          JOIN terrain_types tt ON tt.id = t.terrain_type_id
          LEFT JOIN regions r ON r.id = t.region_id
          LEFT JOIN countries c ON c.id = t.controller_country_id
+         LEFT JOIN country_tile_knowledge ctk
+           ON ctk.game_id = t.game_id AND ctk.tile_id = t.id
+          AND ctk.country_id = $6
          WHERE t.game_id = $1 AND t.q BETWEEN $2 AND $3 AND t.r BETWEEN $4 AND $5
          ORDER BY t.r, t.q`,
-        [input.gameId, input.minQ, input.maxQ, input.minR, input.maxR],
+        [
+          input.gameId,
+          input.minQ,
+          input.maxQ,
+          input.minR,
+          input.maxR,
+          view.countryId,
+        ],
       ),
       this.database.query<CityRow>(
         `SELECT ci.id, ci.tile_id, ci.name, ci.importance, ci.status
@@ -256,11 +365,26 @@ export class WorldService {
          WHERE ci.game_id = $1 AND t.q BETWEEN $2 AND $3 AND t.r BETWEEN $4 AND $5`,
         [input.gameId, input.minQ, input.maxQ, input.minR, input.maxR],
       ),
-      this.database.query<ArmyRow>(
-        `SELECT a.id, a.tile_id, a.name, a.strength, a.status, a.country_id
+      this.database.query<PerceivedArmyRow>(
+        `SELECT a.id, a.tile_id, a.name, a.strength, a.status, a.country_id,
+                cai.perceived_name, cai.perceived_country_id,
+                cai.strength_min, cai.strength_max,
+                cai.confidence AS intelligence_confidence,
+                cai.observed_world_version AS intelligence_world_version,
+                cai.is_outdated AS intelligence_outdated
          FROM armies a JOIN hex_tiles t ON t.id = a.tile_id
+         LEFT JOIN country_army_intelligence cai
+           ON cai.game_id = a.game_id AND cai.army_id = a.id
+          AND cai.country_id = $6
          WHERE a.game_id = $1 AND t.q BETWEEN $2 AND $3 AND t.r BETWEEN $4 AND $5`,
-        [input.gameId, input.minQ, input.maxQ, input.minR, input.maxR],
+        [
+          input.gameId,
+          input.minQ,
+          input.maxQ,
+          input.minR,
+          input.maxR,
+          view.countryId,
+        ],
       ),
     ]);
     const cities = new Map<string, MapCityMarker[]>();
@@ -276,33 +400,41 @@ export class WorldService {
     }
     const armies = new Map<string, MapArmyMarker[]>();
     for (const row of armiesResult.rows) {
+      const army = projectArmy(row, view);
+      if (!army) continue;
       const list = armies.get(row.tile_id) ?? [];
-      list.push({
-        id: row.id,
-        name: row.name,
-        strength: row.strength,
-        status: row.status,
-        countryId: row.country_id,
-      });
+      list.push(army);
       armies.set(row.tile_id, list);
     }
-    const tiles: MapTileSummary[] = tilesResult.rows.map((row) => ({
-      id: row.id,
-      q: row.q,
-      r: row.r,
-      terrainKey: row.terrain_key,
-      terrainName: row.terrain_name,
-      terrainColor: row.terrain_color,
-      regionId: row.region_id,
-      regionName: row.region_name,
-      controllerCountryId: row.controller_country_id,
-      controllerCountryName: row.controller_country_name,
-      controllerColor: row.controller_color,
-      passable: row.passable,
-      movementCost: Number(row.movement_cost),
-      cities: cities.get(row.id) ?? [],
-      armies: armies.get(row.id) ?? [],
-    }));
+    const tiles: MapTileSummary[] = tilesResult.rows.map((row) => {
+      const discoveryState = discoveryFor(view, row.discovery_state);
+      return hideUnknownTile(
+        {
+          id: row.id,
+          q: row.q,
+          r: row.r,
+          discoveryState,
+          confidence: view.access === 'Truth' ? 100 : row.knowledge_confidence,
+          observedWorldVersion:
+            row.observed_world_version === null
+              ? null
+              : Number(row.observed_world_version),
+          terrainKey: row.terrain_key,
+          terrainName: row.terrain_name,
+          terrainColor: row.terrain_color,
+          regionId: row.region_id,
+          regionName: row.region_name,
+          controllerCountryId: row.controller_country_id,
+          controllerCountryName: row.controller_country_name,
+          controllerColor: row.controller_color,
+          passable: row.passable,
+          movementCost: Number(row.movement_cost),
+          cities: cities.get(row.id) ?? [],
+          armies: armies.get(row.id) ?? [],
+        },
+        discoveryState,
+      );
+    });
     return {
       mapId: map.id,
       worldVersion: map.currentWorldVersion,
@@ -312,6 +444,8 @@ export class WorldService {
         minR: input.minR,
         maxR: input.maxR,
       },
+      viewMode: view.responseMode,
+      viewCountryId: view.countryId,
       tiles,
     };
   }
@@ -320,8 +454,9 @@ export class WorldService {
     gameId: string,
     userId: string,
     tileId: string,
+    previewMemberId?: string,
   ): Promise<TileDetails> {
-    const role = await this.requireMember(gameId, userId);
+    const view = await this.resolveView(gameId, userId, previewMemberId);
     const location = await this.database.query<{ q: number; r: number }>(
       'SELECT q, r FROM hex_tiles WHERE game_id = $1 AND id = $2',
       [gameId, tileId],
@@ -335,6 +470,7 @@ export class WorldService {
       maxQ: point.q,
       minR: point.r,
       maxR: point.r,
+      previewMemberId,
     });
     const tile = viewport.tiles[0];
     if (!tile) throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到该地块。');
@@ -356,16 +492,21 @@ export class WorldService {
       [gameId, tileId],
     );
     const row = extra.rows[0]!;
+    const hasGeography =
+      view.access === 'Truth' ||
+      tile.discoveryState === 'Mapped' ||
+      tile.discoveryState === 'Observed' ||
+      tile.discoveryState === 'Outdated';
+    const hasCurrentState =
+      view.access === 'Truth' || tile.discoveryState === 'Observed';
     return {
       ...tile,
-      provinceName: row.province_name,
-      legalOwnerCountryName: row.legal_owner_name,
-      occupierCountryName: row.occupier_name,
-      elevation: row.elevation,
-      roadLevel: row.road_level,
-      ...(role === 'Host' || role === 'Administrator'
-        ? { notes: row.notes }
-        : {}),
+      provinceName: hasGeography ? row.province_name : null,
+      legalOwnerCountryName: hasCurrentState ? row.legal_owner_name : null,
+      occupierCountryName: hasCurrentState ? row.occupier_name : null,
+      elevation: hasGeography ? row.elevation : null,
+      roadLevel: hasGeography ? row.road_level : null,
+      ...(view.access === 'Truth' ? { notes: row.notes } : {}),
     };
   }
 
@@ -373,8 +514,9 @@ export class WorldService {
     gameId: string,
     userId: string,
     tileId: string,
+    previewMemberId?: string,
   ): Promise<MapTileSummary[]> {
-    const tile = await this.getTile(gameId, userId, tileId);
+    const tile = await this.getTile(gameId, userId, tileId, previewMemberId);
     // q/r uses an odd-row offset grid, so diagonal neighbors depend on row parity.
     const coordinates =
       Math.abs(tile.r % 2) === 1
@@ -401,6 +543,7 @@ export class WorldService {
       maxQ: tile.q + 1,
       minR: tile.r - 1,
       maxR: tile.r + 1,
+      previewMemberId,
     });
     return result.tiles.filter((candidate) =>
       coordinates.some(
@@ -414,15 +557,41 @@ export class WorldService {
     gameId: string,
     userId: string,
     query: string,
+    previewMemberId?: string,
   ): Promise<MapSearchResult[]> {
-    await this.requireMember(gameId, userId);
+    const view = await this.resolveView(gameId, userId, previewMemberId);
     const result = await this.database.query<MapSearchResult>(
       `SELECT * FROM (
-         SELECT ci.id, 'City'::text AS type, ci.name, ci.tile_id AS "tileId", t.q, t.r FROM cities ci JOIN hex_tiles t ON t.id = ci.tile_id WHERE ci.game_id = $1
-         UNION ALL SELECT a.id, 'Army', a.name, a.tile_id, t.q, t.r FROM armies a JOIN hex_tiles t ON t.id = a.tile_id WHERE a.game_id = $1
-         UNION ALL SELECT r.id, 'Region', r.name, NULL::uuid, NULL::integer, NULL::integer FROM regions r WHERE r.game_id = $1
+         SELECT ci.id, 'City'::text AS type, ci.name, ci.tile_id AS "tileId", t.q, t.r
+         FROM cities ci JOIN hex_tiles t ON t.id = ci.tile_id
+         LEFT JOIN country_tile_knowledge ctk ON ctk.game_id = t.game_id
+           AND ctk.tile_id = t.id AND ctk.country_id = $3
+         WHERE ci.game_id = $1 AND ($4 OR $5 OR ctk.discovery_state IN ('Mapped', 'Observed', 'Outdated'))
+         UNION ALL
+         SELECT a.id, 'Army',
+                CASE WHEN $4 OR a.country_id = $3 THEN a.name ELSE cai.perceived_name END,
+                a.tile_id, t.q, t.r
+         FROM armies a JOIN hex_tiles t ON t.id = a.tile_id
+         LEFT JOIN country_army_intelligence cai ON cai.game_id = a.game_id
+           AND cai.army_id = a.id AND cai.country_id = $3
+         WHERE a.game_id = $1 AND ($4 OR a.country_id = $3 OR cai.army_id IS NOT NULL)
+         UNION ALL
+         SELECT r.id, 'Region', r.name, NULL::uuid, NULL::integer, NULL::integer
+         FROM regions r
+         WHERE r.game_id = $1 AND ($4 OR $5 OR EXISTS (
+           SELECT 1 FROM hex_tiles t
+           JOIN country_tile_knowledge ctk ON ctk.game_id = t.game_id
+             AND ctk.tile_id = t.id AND ctk.country_id = $3
+           WHERE t.region_id = r.id AND ctk.discovery_state IN ('Mapped', 'Observed', 'Outdated')
+         ))
        ) objects WHERE LOWER(name) LIKE LOWER($2) ORDER BY name LIMIT 20`,
-      [gameId, `%${query}%`],
+      [
+        gameId,
+        `%${query}%`,
+        view.countryId,
+        view.access === 'Truth',
+        view.access === 'Public',
+      ],
     );
     return result.rows;
   }

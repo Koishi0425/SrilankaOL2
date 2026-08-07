@@ -46,12 +46,22 @@ function drawHex(
   context.closePath();
 }
 
+function formatStrength(army: MapTileSummary['armies'][number]): string {
+  if (army.strength.kind === 'Exact') return String(army.strength.value);
+  if (army.strength.kind === 'Range') {
+    return `约 ${army.strength.min}–${army.strength.max}`;
+  }
+  return '人数未知';
+}
+
 export function HexMap({
   game,
   countries,
+  previewMemberId,
 }: {
   game: GameSummary;
   countries: CountrySummary[];
+  previewMemberId?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
@@ -76,7 +86,8 @@ export function HexMap({
     id: string;
     name: string;
   } | null>(null);
-  const canEdit = game.role === 'Host' || game.role === 'Administrator';
+  const canEdit =
+    !previewMemberId && (game.role === 'Host' || game.role === 'Administrator');
 
   useEffect(() => {
     void fetchMap(game.id)
@@ -136,7 +147,7 @@ export function HexMap({
       return;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
-      void fetchMapViewport(game.id, bounds, controller.signal)
+      void fetchMapViewport(game.id, bounds, controller.signal, previewMemberId)
         .then(setViewport)
         .catch((reason: unknown) => {
           if (!(
@@ -150,7 +161,13 @@ export function HexMap({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [bounds, game.id, metadata, revision]);
+  }, [bounds, game.id, metadata, previewMemberId, revision]);
+
+  useEffect(() => {
+    setSelected(null);
+    setMovingArmy(null);
+    setResults([]);
+  }, [previewMemberId]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -170,8 +187,19 @@ export function HexMap({
       const y = view.offsetY + point.y * view.scale;
       const radius = HEX_SIZE * view.scale - 1;
       drawHex(context, x, y, radius);
-      context.fillStyle = tile.controllerColor ?? tile.terrainColor;
-      context.globalAlpha = tile.controllerColor ? 0.82 : 1;
+      context.fillStyle =
+        tile.controllerColor ?? tile.terrainColor ?? '#1c2926';
+      context.globalAlpha =
+        tile.discoveryState === 'Unknown'
+          ? 0.35
+          : tile.discoveryState === 'Rumored' ||
+              tile.discoveryState === 'Discovered'
+            ? 0.55
+            : tile.discoveryState === 'Outdated'
+              ? 0.68
+              : tile.controllerColor
+                ? 0.82
+                : 1;
       context.fill();
       context.globalAlpha = 1;
       context.strokeStyle =
@@ -214,7 +242,7 @@ export function HexMap({
       setSelected(
         movingArmy
           ? await moveArmy(game.id, movingArmy.id, tile.id)
-          : await fetchTile(game.id, tile.id),
+          : await fetchTile(game.id, tile.id, previewMemberId),
       );
       if (movingArmy) {
         setMovingArmy(null);
@@ -230,7 +258,7 @@ export function HexMap({
     event.preventDefault();
     if (!search.trim()) return;
     try {
-      setResults(await searchMap(game.id, search.trim()));
+      setResults(await searchMap(game.id, search.trim(), previewMemberId));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '搜索失败');
     }
@@ -350,7 +378,9 @@ export function HexMap({
                 <h3>
                   {selected.regionName ?? `地块 ${selected.q},${selected.r}`}
                 </h3>
-                <span className="tag">{selected.terrainName}</span>
+                <span className="tag">
+                  {selected.terrainName ?? '未知地形'}
+                </span>
               </div>
               <dl>
                 <dt>坐标</dt>
@@ -358,11 +388,17 @@ export function HexMap({
                   {selected.q}, {selected.r}
                 </dd>
                 <dt>省份</dt>
-                <dd>{selected.provinceName ?? '—'}</dd>
+                <dd>{selected.provinceName ?? '未知'}</dd>
                 <dt>控制</dt>
-                <dd>{selected.controllerCountryName ?? '无'}</dd>
+                <dd>{selected.controllerCountryName ?? '未知'}</dd>
                 <dt>移动消耗</dt>
-                <dd>{selected.movementCost}</dd>
+                <dd>{selected.movementCost ?? '未知'}</dd>
+                <dt>地图认知</dt>
+                <dd>
+                  {selected.discoveryState}
+                  {selected.observedWorldVersion !== null &&
+                    ` · 世界版本 ${selected.observedWorldVersion}`}
+                </dd>
                 <dt>城市</dt>
                 <dd>
                   {selected.cities.map((city) => city.name).join('、') || '无'}
@@ -373,12 +409,16 @@ export function HexMap({
                     ? '无'
                     : selected.armies.map((army) => (
                         <span className="army-entry" key={army.id}>
-                          {army.name} ({army.strength})
+                          {army.name ?? '未确认部队'} ({formatStrength(army)})
+                          {army.outdated && ' · 已过时'}
                           {canEdit && (
                             <button
                               type="button"
                               onClick={() =>
-                                setMovingArmy({ id: army.id, name: army.name })
+                                setMovingArmy({
+                                  id: army.id,
+                                  name: army.name ?? '未确认部队',
+                                })
                               }
                             >
                               移动

@@ -16,9 +16,16 @@ const viewportQuery = z
     maxR: z.coerce.number().int(),
     zoom: z.coerce.number().positive().optional(),
     layers: z.string().optional(),
+    previewMemberId: z.string().uuid().optional(),
   })
   .refine((value) => value.minQ <= value.maxQ && value.minR <= value.maxR);
-const searchQuery = z.object({ q: z.string().trim().min(1).max(120) });
+const searchQuery = z.object({
+  q: z.string().trim().min(1).max(120),
+  previewMemberId: z.string().uuid().optional(),
+});
+const previewQuery = z.object({
+  previewMemberId: z.string().uuid().optional(),
+});
 const updateTileBody = z
   .object({
     terrainTypeId: z.string().uuid().optional(),
@@ -100,11 +107,17 @@ export async function registerWorldRoutes(
     const user = await requireUser(request, reply, auth);
     if (!user) return reply;
     const params = parsed(request, reply, tileParams, request.params);
-    if (!params) return reply;
+    const query = parsed(request, reply, previewQuery, request.query);
+    if (!params || !query) return reply;
     return reply.send(
       envelope(
         request,
-        await world.getTile(params.gameId, user.id, params.tileId),
+        await world.getTile(
+          params.gameId,
+          user.id,
+          params.tileId,
+          query.previewMemberId,
+        ),
       ),
     );
   });
@@ -115,11 +128,17 @@ export async function registerWorldRoutes(
       const user = await requireUser(request, reply, auth);
       if (!user) return reply;
       const params = parsed(request, reply, tileParams, request.params);
-      if (!params) return reply;
+      const query = parsed(request, reply, previewQuery, request.query);
+      if (!params || !query) return reply;
       return reply.send(
         envelope(
           request,
-          await world.getNeighbors(params.gameId, user.id, params.tileId),
+          await world.getNeighbors(
+            params.gameId,
+            user.id,
+            params.tileId,
+            query.previewMemberId,
+          ),
         ),
       );
     },
@@ -132,7 +151,15 @@ export async function registerWorldRoutes(
     const query = parsed(request, reply, searchQuery, request.query);
     if (!params || !query) return reply;
     return reply.send(
-      envelope(request, await world.search(params.gameId, user.id, query.q)),
+      envelope(
+        request,
+        await world.search(
+          params.gameId,
+          user.id,
+          query.q,
+          query.previewMemberId,
+        ),
+      ),
     );
   });
 
