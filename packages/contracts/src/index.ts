@@ -189,3 +189,102 @@ export interface MapSearchResult {
   q: number | null;
   r: number | null;
 }
+
+export type ActionCategory =
+  | 'EventResponse'
+  | 'Policy'
+  | 'Reform'
+  | 'Diplomacy'
+  | 'Construction'
+  | 'Research'
+  | 'Recruitment'
+  | 'Military'
+  | 'Intelligence'
+  | 'Custom';
+export type ActionSecrecy = 'OwnerOnly' | 'Participants' | 'Public';
+export type ActionStatus =
+  | 'Draft'
+  | 'Submitted'
+  | 'HostReview'
+  | 'NeedPlayerInput'
+  | 'AIStructuring'
+  | 'PendingHostApproval'
+  | 'PendingPlayerConfirmation'
+  | 'Approved'
+  | 'Rejected'
+  | 'Resolving'
+  | 'Completed'
+  | 'Withdrawn'
+  | 'Invalidated';
+
+export interface ActionObjectRef {
+  id: string;
+  refKind: 'Actor' | 'Target' | 'Context';
+  objectType: 'Tile' | 'City' | 'Army' | 'Country' | 'Character' | 'Region';
+  objectId: string;
+  label: string;
+}
+
+export interface ActionSummary {
+  id: string;
+  quarterId: string;
+  countryId: string;
+  countryName: string;
+  createdByMemberId: string;
+  title: string;
+  category: ActionCategory;
+  secrecy: ActionSecrecy;
+  status: ActionStatus;
+  version: number;
+  submittedAt: string | null;
+  updatedAt: string;
+}
+
+export interface ActionVersion {
+  version: number;
+  title: string;
+  originalText: string;
+  category: ActionCategory;
+  secrecy: ActionSecrecy;
+  createdAt: string;
+}
+
+export interface ActionStatusEntry {
+  fromStatus: ActionStatus | null;
+  toStatus: ActionStatus;
+  reason: string;
+  createdAt: string;
+}
+
+export interface ActionDetails extends ActionSummary {
+  currentText: string;
+  submittedOriginalText: string | null;
+  refs: ActionObjectRef[];
+  latestInterpretation: string | null;
+  pendingInputRequest: string | null;
+  history: ActionStatusEntry[];
+}
+
+export interface ConversationSummary {
+  id: string;
+  type: 'HostPlayer' | 'BilateralDiplomacy' | 'Multilateral' | 'ActionReview';
+  title: string;
+  participantNames: string[];
+  unreadCount: number;
+  latestMessage: string | null;
+  lastMessageAt: string | null;
+}
+
+export interface ConversationMessage {
+  id: string;
+  conversationId: string;
+  senderDisplayName: string;
+  content: string;
+  sentAt: string;
+  invalidated: boolean;
+}
+
+export interface MessagePage {
+  items: ConversationMessage[];
+  nextCursor: string | null;
+}

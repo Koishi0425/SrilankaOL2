@@ -29,6 +29,10 @@ const assignmentSchema = z.object({
   countryId: z.string().uuid(),
   role: z.literal('PrimaryController').optional(),
 });
+const quarterStateSchema = z.object({
+  state: z.enum(['ActionSubmission', 'Locked', 'HostReview']),
+  actionDeadline: z.string().datetime().nullable().optional(),
+});
 
 function parseGameId(
   request: FastifyRequest,
@@ -114,6 +118,36 @@ export async function registerGameRoutes(
     const data: QuarterSummary = await games.getCurrentQuarter(gameId, user.id);
     return reply.send(response(request, data));
   });
+
+  app.patch(
+    '/api/v1/games/:gameId/quarters/current/state',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      if (!user) return reply;
+      const gameId = parseGameId(request, reply);
+      if (!gameId) return reply;
+      const parsed = quarterStateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return sendApiError(
+          request,
+          reply,
+          400,
+          'VALIDATION_FAILED',
+          '季度状态信息格式不正确。',
+        );
+      }
+      return reply.send(
+        response(
+          request,
+          await games.transitionCurrentQuarter({
+            gameId,
+            userId: user.id,
+            ...parsed.data,
+          }),
+        ),
+      );
+    },
+  );
 
   app.get('/api/v1/games/:gameId/countries', async (request, reply) => {
     const user = await requireUser(request, reply, auth);

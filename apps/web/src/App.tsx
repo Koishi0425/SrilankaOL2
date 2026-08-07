@@ -20,7 +20,9 @@ import {
   logout,
   register,
 } from './api.js';
+import { ActionCenter, type ActionDraftSeed } from './actions/ActionCenter.js';
 import { HexMap } from './map/HexMap.js';
+import { MessageCenter } from './messages/MessageCenter.js';
 
 type SessionState =
   | { kind: 'loading' }
@@ -209,7 +211,16 @@ function GameWorkspace({ game }: { game: GameSummary }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [previewMemberId, setPreviewMemberId] = useState('');
+  const [workspaceTab, setWorkspaceTab] = useState<
+    'map' | 'actions' | 'messages'
+  >('map');
+  const [actionSeed, setActionSeed] = useState<ActionDraftSeed>();
+  const [currentQuarter, setCurrentQuarter] = useState(game.currentQuarter);
   const canManage = game.role === 'Host' || game.role === 'Administrator';
+
+  useEffect(() => {
+    setCurrentQuarter(game.currentQuarter);
+  }, [game.currentQuarter, game.id]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -260,9 +271,8 @@ function GameWorkspace({ game }: { game: GameSummary }) {
           <h2>{game.name}</h2>
         </div>
         <div className="quarter-chip">
-          第 {game.currentQuarter.gameYear} 年 ·{' '}
-          {seasonNames[game.currentQuarter.season]}
-          <small>{game.currentQuarter.state}</small>
+          第 {currentQuarter.gameYear} 年 · {seasonNames[currentQuarter.season]}
+          <small>{currentQuarter.state}</small>
         </div>
       </div>
 
@@ -270,13 +280,44 @@ function GameWorkspace({ game }: { game: GameSummary }) {
       {error && <p className="form-error">{error}</p>}
       {!loading && (
         <>
-          {canManage && (
+          <nav className="workspace-tabs" aria-label="游戏工作区">
+            <button
+              className={workspaceTab === 'map' ? 'workspace-tabs__active' : ''}
+              onClick={() => setWorkspaceTab('map')}
+            >
+              世界地图
+            </button>
+            {(game.role === 'Player' || canManage) && !previewMemberId && (
+              <button
+                className={
+                  workspaceTab === 'actions' ? 'workspace-tabs__active' : ''
+                }
+                onClick={() => setWorkspaceTab('actions')}
+              >
+                {canManage ? '行动审核' : '行动中心'}
+              </button>
+            )}
+            {!previewMemberId && (
+              <button
+                className={
+                  workspaceTab === 'messages' ? 'workspace-tabs__active' : ''
+                }
+                onClick={() => setWorkspaceTab('messages')}
+              >
+                消息中心
+              </button>
+            )}
+          </nav>
+          {canManage && workspaceTab === 'map' && (
             <div className="preview-control">
               <label>
                 玩家视角预览
                 <select
                   value={previewMemberId}
-                  onChange={(event) => setPreviewMemberId(event.target.value)}
+                  onChange={(event) => {
+                    setPreviewMemberId(event.target.value);
+                    setWorkspaceTab('map');
+                  }}
                 >
                   <option value="">主持人真实视角</option>
                   {members
@@ -296,92 +337,125 @@ function GameWorkspace({ game }: { game: GameSummary }) {
               )}
             </div>
           )}
-          <HexMap
-            game={game}
-            countries={countries}
-            previewMemberId={previewMemberId || undefined}
-          />
-          <div className="context-grid">
-            <div>
-              <h3>国家</h3>
-              <div className="tag-list">
-                {countries.map((country) => (
-                  <span className="tag" key={country.id}>
-                    {country.name}
-                  </span>
-                ))}
-                {countries.length === 0 && (
-                  <span className="muted">暂无国家</span>
+          {workspaceTab === 'map' && (
+            <>
+              <HexMap
+                game={{ ...game, currentQuarter }}
+                countries={countries}
+                previewMemberId={previewMemberId || undefined}
+                onCreateAction={(tile) => {
+                  setActionSeed({
+                    key: Date.now(),
+                    title: `关于${tile.regionName ?? `地块 ${tile.q},${tile.r}`}的行动`,
+                    ref: {
+                      refKind: 'Target',
+                      objectType: 'Tile',
+                      objectId: tile.id,
+                      label: tile.regionName ?? `${tile.q},${tile.r}`,
+                    },
+                  });
+                  setWorkspaceTab('actions');
+                }}
+              />
+              <div className="context-grid">
+                <div>
+                  <h3>国家</h3>
+                  <div className="tag-list">
+                    {countries.map((country) => (
+                      <span className="tag" key={country.id}>
+                        {country.name}
+                      </span>
+                    ))}
+                    {countries.length === 0 && (
+                      <span className="muted">暂无国家</span>
+                    )}
+                  </div>
+                </div>
+
+                {canManage && (
+                  <div>
+                    <h3>成员管理</h3>
+                    <p className="muted member-help">
+                      用户需先完成自助注册，再由主持人按用户名分配玩家或观察者身份。
+                    </p>
+                    <form
+                      className="member-form"
+                      onSubmit={(event) => void submitMember(event)}
+                    >
+                      <input
+                        required
+                        aria-label="成员用户名"
+                        maxLength={64}
+                        placeholder="成员用户名"
+                        value={username}
+                        onChange={(event) => setUsername(event.target.value)}
+                      />
+                      <select
+                        value={role}
+                        onChange={(event) =>
+                          setRole(event.target.value as 'Player' | 'Observer')
+                        }
+                      >
+                        <option value="Player">玩家</option>
+                        <option value="Observer">观察者</option>
+                      </select>
+                      <button className="button" type="submit">
+                        添加
+                      </button>
+                    </form>
+                    <div className="member-list">
+                      {members.map((member) => (
+                        <div className="member-row" key={member.id}>
+                          <span>
+                            <strong>{member.displayName}</strong>
+                            <small>
+                              {member.username} · {member.role}
+                            </small>
+                          </span>
+                          {member.role === 'Player' ? (
+                            <select
+                              aria-label={`为 ${member.displayName} 分配国家`}
+                              value={member.controlledCountryId ?? ''}
+                              onChange={(event) =>
+                                void changeCountry(
+                                  member.id,
+                                  event.target.value,
+                                )
+                              }
+                            >
+                              <option value="">未分配国家</option>
+                              {countries.map((country) => (
+                                <option key={country.id} value={country.id}>
+                                  {country.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="muted">
+                              {member.controlledCountryName ?? '—'}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
-            </div>
-
-            {canManage && (
-              <div>
-                <h3>成员管理</h3>
-                <p className="muted member-help">
-                  用户需先完成自助注册，再由主持人按用户名分配玩家或观察者身份。
-                </p>
-                <form
-                  className="member-form"
-                  onSubmit={(event) => void submitMember(event)}
-                >
-                  <input
-                    required
-                    aria-label="成员用户名"
-                    maxLength={64}
-                    placeholder="成员用户名"
-                    value={username}
-                    onChange={(event) => setUsername(event.target.value)}
-                  />
-                  <select
-                    value={role}
-                    onChange={(event) =>
-                      setRole(event.target.value as 'Player' | 'Observer')
-                    }
-                  >
-                    <option value="Player">玩家</option>
-                    <option value="Observer">观察者</option>
-                  </select>
-                  <button className="button" type="submit">
-                    添加
-                  </button>
-                </form>
-                <div className="member-list">
-                  {members.map((member) => (
-                    <div className="member-row" key={member.id}>
-                      <span>
-                        <strong>{member.displayName}</strong>
-                        <small>
-                          {member.username} · {member.role}
-                        </small>
-                      </span>
-                      {member.role === 'Player' ? (
-                        <select
-                          aria-label={`为 ${member.displayName} 分配国家`}
-                          value={member.controlledCountryId ?? ''}
-                          onChange={(event) =>
-                            void changeCountry(member.id, event.target.value)
-                          }
-                        >
-                          <option value="">未分配国家</option>
-                          {countries.map((country) => (
-                            <option key={country.id} value={country.id}>
-                              {country.name}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className="muted">
-                          {member.controlledCountryName ?? '—'}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+            </>
+          )}
+          {workspaceTab === 'actions' && !previewMemberId && (
+            <ActionCenter
+              game={{ ...game, currentQuarter }}
+              seed={actionSeed}
+              onQuarterChange={setCurrentQuarter}
+            />
+          )}
+          {workspaceTab === 'messages' && !previewMemberId && (
+            <MessageCenter
+              game={{ ...game, currentQuarter }}
+              countries={countries}
+            />
+          )}
         </>
       )}
     </section>

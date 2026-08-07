@@ -182,6 +182,94 @@ export class GameService {
     return (await this.getForUser(gameId, userId)).currentQuarter;
   }
 
+  async transitionCurrentQuarter(input: {
+    gameId: string;
+    userId: string;
+    state: 'ActionSubmission' | 'Locked' | 'HostReview';
+    actionDeadline?: string | null;
+  }): Promise<QuarterSummary> {
+    await this.requireHost(input.gameId, input.userId);
+    const client = await this.database.connect();
+    try {
+      await client.query('BEGIN');
+      const current = await client.query<{
+        id: string;
+        state: QuarterState;
+      }>(
+        `SELECT id, state FROM quarters
+         WHERE game_id = $1 AND is_current = TRUE FOR UPDATE`,
+        [input.gameId],
+      );
+      const quarter = current.rows[0];
+      if (!quarter)
+        throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到当前季度。');
+      const allowed: Record<string, string[]> = {
+        Preparing: ['ActionSubmission'],
+        EventResponse: ['ActionSubmission'],
+        ActionSubmission: ['Locked'],
+        Locked: ['HostReview', 'ActionSubmission'],
+      };
+      if (!allowed[quarter.state]?.includes(input.state)) {
+        throw new ApiFault(
+          409,
+          'INVALID_QUARTER_TRANSITION',
+          '季度状态不能这样转换。',
+        );
+      }
+      await client.query(
+        `UPDATE quarters SET state = $1,
+           action_deadline = CASE WHEN $1 = 'ActionSubmission' THEN $2 ELSE action_deadline END,
+           started_at = CASE WHEN $1 = 'ActionSubmission' THEN COALESCE(started_at, NOW()) ELSE started_at END
+         WHERE game_id = $3 AND id = $4`,
+        [input.state, input.actionDeadline ?? null, input.gameId, quarter.id],
+      );
+      await client.query(
+        `INSERT INTO quarter_state_history (
+           id, game_id, quarter_id, from_state, to_state, actor_user_id
+         ) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [
+          randomUUID(),
+          input.gameId,
+          quarter.id,
+          quarter.state,
+          input.state,
+          input.userId,
+        ],
+      );
+      if (input.state === 'HostReview') {
+        await client.query(
+          `INSERT INTO action_status_history (
+             id, game_id, action_id, from_status, to_status, actor_user_id, reason
+           )
+           SELECT gen_random_uuid(), game_id, id, status, 'HostReview', $2,
+                  '季度进入主持人审核'
+           FROM actions
+           WHERE game_id = $1 AND quarter_id = $3 AND status = 'Submitted'`,
+          [input.gameId, input.userId, quarter.id],
+        );
+        await client.query(
+          `UPDATE actions SET status = 'HostReview', updated_at = NOW()
+           WHERE game_id = $1 AND quarter_id = $2 AND status = 'Submitted'`,
+          [input.gameId, quarter.id],
+        );
+      }
+      if (input.state === 'ActionSubmission') {
+        await client.query(
+          `UPDATE games SET status = 'Running', started_at = COALESCE(started_at, NOW())
+           WHERE id = $1 AND status = 'Preparing'`,
+          [input.gameId],
+        );
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return this.getCurrentQuarter(input.gameId, input.userId);
+  }
+
   private async requireHost(gameId: string, userId: string): Promise<void> {
     const result = await this.database.query<{ role: GameRole }>(
       `SELECT role FROM game_members

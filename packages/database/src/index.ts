@@ -1,8 +1,9 @@
-import pg from 'pg';
+import pg, { type PoolClient } from 'pg';
 
 const { Pool } = pg;
 
 export type DatabasePool = InstanceType<typeof Pool>;
+export type DatabaseClient = PoolClient;
 
 export function createDatabasePool(connectionString: string): DatabasePool {
   return new Pool({

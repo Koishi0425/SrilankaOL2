@@ -3,7 +3,9 @@ import { checkDatabase, createDatabasePool } from '@srilanka/database';
 import { createClient } from 'redis';
 
 import { buildApp } from './app.js';
+import { ActionService } from './modules/actions/action-service.js';
 import { AuthService } from './modules/auth/auth-service.js';
+import { CommunicationService } from './modules/communications/communication-service.js';
 import { GameService } from './modules/games/game-service.js';
 import { WorldService } from './modules/world/world-service.js';
 
@@ -13,6 +15,8 @@ const redis = createClient({ url: config.redisUrl });
 const auth = new AuthService(database);
 const games = new GameService(database);
 const world = new WorldService(database);
+const actions = new ActionService(database);
+const communications = new CommunicationService(database);
 let redisConnection: Promise<void> | undefined;
 
 async function ensureRedis(): Promise<void> {
@@ -33,6 +37,8 @@ const app = await buildApp({
   auth,
   games,
   world,
+  actions,
+  communications,
   secureCookies: config.nodeEnv === 'production',
   health: {
     checkDatabase: () => checkDatabase(database),

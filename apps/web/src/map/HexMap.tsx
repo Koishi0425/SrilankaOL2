@@ -67,10 +67,12 @@ export function HexMap({
   game,
   countries,
   previewMemberId,
+  onCreateAction,
 }: {
   game: GameSummary;
   countries: CountrySummary[];
   previewMemberId?: string;
+  onCreateAction?: (tile: TileDetails) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
@@ -437,6 +439,15 @@ export function HexMap({
                       ))}
                 </dd>
               </dl>
+              {game.role === 'Player' && !previewMemberId && onCreateAction && (
+                <button
+                  className="button map-action-button"
+                  type="button"
+                  onClick={() => onCreateAction(selected)}
+                >
+                  基于此地块创建行动
+                </button>
+              )}
               {canEdit && (
                 <div className="map-editor">
                   <h4>主持人编辑</h4>

@@ -6,9 +6,13 @@ import type { ApiErrorBody, HealthResponse } from '@srilanka/contracts';
 import { createLogger } from '@srilanka/logger';
 
 import { ApiFault } from './errors.js';
+import { registerActionRoutes } from './modules/actions/action-routes.js';
+import type { ActionService } from './modules/actions/action-service.js';
 import { getHealth, type HealthDependencies } from './health.js';
 import { registerAuthRoutes } from './modules/auth/auth-routes.js';
 import type { AuthService } from './modules/auth/auth-service.js';
+import { registerCommunicationRoutes } from './modules/communications/communication-routes.js';
+import type { CommunicationService } from './modules/communications/communication-service.js';
 import { registerGameRoutes } from './modules/games/game-routes.js';
 import type { GameService } from './modules/games/game-service.js';
 import { registerWorldRoutes } from './modules/world/world-routes.js';
@@ -22,6 +26,8 @@ export interface AppOptions {
   auth?: AuthService;
   games?: GameService;
   world?: WorldService;
+  actions?: ActionService;
+  communications?: CommunicationService;
   secureCookies?: boolean;
 }
 
@@ -92,6 +98,16 @@ export async function buildApp(options: AppOptions) {
       await registerGameRoutes(routes, options.auth!, options.games!);
       if (options.world) {
         await registerWorldRoutes(routes, options.auth!, options.world);
+      }
+      if (options.actions) {
+        await registerActionRoutes(routes, options.auth!, options.actions);
+      }
+      if (options.communications) {
+        await registerCommunicationRoutes(
+          routes,
+          options.auth!,
+          options.communications,
+        );
       }
     });
   }
