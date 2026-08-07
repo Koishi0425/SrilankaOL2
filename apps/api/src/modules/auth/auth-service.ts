@@ -17,7 +17,7 @@ const SCRYPT_P = 1;
 
 interface UserRow {
   id: string;
-  email: string;
+  username: string;
   display_name: string;
   password_hash: string;
   system_role: SystemRole;
@@ -79,7 +79,7 @@ function hashSessionToken(token: string): string {
 function toCurrentUser(row: UserRow): CurrentUser {
   return {
     id: row.id,
-    email: row.email,
+    username: row.username,
     displayName: row.display_name,
     systemRole: row.system_role,
   };
@@ -106,18 +106,18 @@ export class AuthService {
   }
 
   async register(input: {
-    email: string;
+    username: string;
     displayName: string;
     password: string;
   }): Promise<LoginResult | null> {
     const result = await this.database.query<UserRow>(
-      `INSERT INTO users (id, email, display_name, password_hash)
+      `INSERT INTO users (id, username, display_name, password_hash)
        VALUES ($1, LOWER($2), $3, $4)
-       ON CONFLICT ((LOWER(email))) DO NOTHING
-       RETURNING id, email, display_name, password_hash, system_role`,
+       ON CONFLICT ((LOWER(username))) DO NOTHING
+       RETURNING id, username, display_name, password_hash, system_role`,
       [
         randomUUID(),
-        input.email.trim(),
+        input.username.trim(),
         input.displayName.trim(),
         await hashPassword(input.password),
       ],
@@ -125,12 +125,12 @@ export class AuthService {
     return result.rows[0] ? this.createSession(result.rows[0]) : null;
   }
 
-  async login(email: string, password: string): Promise<LoginResult | null> {
+  async login(username: string, password: string): Promise<LoginResult | null> {
     const result = await this.database.query<UserRow>(
-      `SELECT id, email, display_name, password_hash, system_role
+      `SELECT id, username, display_name, password_hash, system_role
        FROM users
-       WHERE LOWER(email) = LOWER($1) AND status = 'Active'`,
-      [email.trim()],
+       WHERE LOWER(username) = LOWER($1) AND status = 'Active'`,
+      [username.trim()],
     );
     const row = result.rows[0];
     if (!row || !(await verifyPassword(password, row.password_hash)))
@@ -143,7 +143,7 @@ export class AuthService {
     if (!token) return null;
 
     const result = await this.database.query<UserRow>(
-      `SELECT u.id, u.email, u.display_name, u.password_hash, u.system_role
+      `SELECT u.id, u.username, u.display_name, u.password_hash, u.system_role
        FROM auth_sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = $1
@@ -165,25 +165,25 @@ export class AuthService {
   }
 
   async createDevelopmentUser(input: {
-    email: string;
+    username: string;
     displayName: string;
     password: string;
     systemRole?: SystemRole;
   }): Promise<CurrentUser> {
     const passwordHash = await hashPassword(input.password);
     const result = await this.database.query<UserRow>(
-      `INSERT INTO users (id, email, display_name, password_hash, system_role)
+      `INSERT INTO users (id, username, display_name, password_hash, system_role)
        VALUES ($1, LOWER($2), $3, $4, $5)
-       ON CONFLICT ((LOWER(email))) DO UPDATE SET
+       ON CONFLICT ((LOWER(username))) DO UPDATE SET
          display_name = EXCLUDED.display_name,
          password_hash = EXCLUDED.password_hash,
          system_role = EXCLUDED.system_role,
          status = 'Active',
          updated_at = NOW()
-       RETURNING id, email, display_name, password_hash, system_role`,
+       RETURNING id, username, display_name, password_hash, system_role`,
       [
         randomUUID(),
-        input.email.trim(),
+        input.username.trim(),
         input.displayName.trim(),
         passwordHash,
         input.systemRole ?? 'User',

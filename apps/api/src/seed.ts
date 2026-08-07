@@ -9,22 +9,22 @@ if (config.nodeEnv === 'production') {
   throw new Error('Development seed is disabled in production');
 }
 
-const email = process.env.SEED_HOST_EMAIL;
+const username = process.env.SEED_HOST_USERNAME;
 const password = process.env.SEED_HOST_PASSWORD;
-if (!email || !password) {
-  throw new Error('SEED_HOST_EMAIL and SEED_HOST_PASSWORD are required');
+if (!username || !password) {
+  throw new Error('SEED_HOST_USERNAME and SEED_HOST_PASSWORD are required');
 }
 
 const database = createDatabasePool(config.databaseUrl);
 try {
   const auth = new AuthService(database);
   const user = await auth.createDevelopmentUser({
-    email,
+    username,
     password,
     displayName: process.env.SEED_HOST_NAME ?? '主持人',
     systemRole: 'User',
   });
-  process.stdout.write(`Development host ready: ${user.email}\n`);
+  process.stdout.write(`Development host ready: ${user.username}\n`);
 
   const games = new GameService(database);
   const accessibleGames = await games.listForUser(user.id);

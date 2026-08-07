@@ -35,7 +35,7 @@ describe('App', () => {
         return jsonResponse({
           data: {
             id: '00000000-0000-4000-8000-000000000001',
-            email: 'host@example.test',
+            username: 'host',
             displayName: 'Host',
             systemRole: 'User',
           },
@@ -46,7 +46,7 @@ describe('App', () => {
         return jsonResponse({
           data: {
             id: '00000000-0000-4000-8000-000000000001',
-            email: 'host@example.test',
+            username: 'host',
             displayName: 'Host',
             systemRole: 'User',
             unreadNotificationCount: 0,
@@ -83,7 +83,7 @@ describe('App', () => {
             {
               id: '00000000-0000-4000-8000-000000000005',
               userId: '00000000-0000-4000-8000-000000000001',
-              email: 'host@example.test',
+              username: 'host',
               displayName: 'Host',
               role: 'Host',
               status: 'Active',
@@ -110,8 +110,8 @@ describe('App', () => {
 
     render(<App />);
 
-    fireEvent.change(await screen.findByLabelText('邮箱'), {
-      target: { value: 'host@example.test' },
+    fireEvent.change(await screen.findByLabelText('用户名'), {
+      target: { value: 'host' },
     });
     fireEvent.change(screen.getByLabelText('密码'), {
       target: { value: 'host-password-123' },
@@ -152,7 +152,7 @@ describe('App', () => {
           {
             data: {
               id: '00000000-0000-4000-8000-000000000010',
-              email: 'new@example.test',
+              username: 'new-player',
               displayName: 'New Player',
               systemRole: 'User',
             },
@@ -165,7 +165,7 @@ describe('App', () => {
         return jsonResponse({
           data: {
             id: '00000000-0000-4000-8000-000000000010',
-            email: 'new@example.test',
+            username: 'new-player',
             displayName: 'New Player',
             systemRole: 'User',
             unreadNotificationCount: 0,
@@ -195,8 +195,8 @@ describe('App', () => {
     fireEvent.change(screen.getByLabelText('显示名称'), {
       target: { value: 'New Player' },
     });
-    fireEvent.change(screen.getByLabelText('邮箱'), {
-      target: { value: 'new@example.test' },
+    fireEvent.change(screen.getByLabelText('用户名'), {
+      target: { value: 'new-player' },
     });
     fireEvent.change(screen.getByLabelText('密码'), {
       target: { value: 'new-player-password' },

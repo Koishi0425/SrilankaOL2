@@ -53,7 +53,7 @@ export type QuarterState =
 
 export interface CurrentUser {
   id: string;
-  email: string;
+  username: string;
   displayName: string;
   systemRole: SystemRole;
 }
@@ -90,7 +90,7 @@ export interface GameDetails extends GameSummary {
 export interface GameMemberSummary {
   id: string;
   userId: string;
-  email: string;
+  username: string;
   displayName: string;
   role: GameRole;
   status: 'Invited' | 'Active' | 'Left' | 'Suspended';

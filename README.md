@@ -55,7 +55,7 @@ pnpm.cmd --filter @srilanka/api test:integration
 
 ## M1 开发账号与动态端口
 
-首次本地启动前，在根目录 `.env` 中填写 `SEED_HOST_EMAIL`、`SEED_HOST_PASSWORD`、`SEED_HOST_NAME`、`SEED_GAME_NAME` 和 `SEED_COUNTRY_NAMES`，然后创建或更新主持人账号及初始游戏：
+首次本地启动前，在根目录 `.env` 中填写 `SEED_HOST_USERNAME`、`SEED_HOST_PASSWORD`、`SEED_HOST_NAME`、`SEED_GAME_NAME` 和 `SEED_COUNTRY_NAMES`，然后创建或更新主持人账号及初始游戏：
 
 ```powershell
 pnpm.cmd db:migrate
@@ -74,4 +74,4 @@ $env:VITE_API_PROXY_TARGET = 'http://127.0.0.1:6369'
 pnpm.cmd dev
 ```
 
-系统同时最多保留一场正在推进的游戏，普通网页不提供创建入口。首次运行 `seed:dev` 会自动建立初始游戏、国家、主持人成员关系和第 1 年春季的准备中季度。其他用户可以在登录页自助注册，再由主持人按注册邮箱将其添加为玩家或观察者；成员管理、国家分配及跨游戏访问均由 API 强制鉴权。
+系统同时最多保留一场正在推进的游戏，普通网页不提供创建入口。首次运行 `seed:dev` 会自动建立初始游戏、国家、主持人成员关系和第 1 年春季的准备中季度。其他用户可以用用户名和密码在登录页自助注册，再由主持人按用户名将其添加为玩家或观察者；成员管理、国家分配及跨游戏访问均由 API 强制鉴权。

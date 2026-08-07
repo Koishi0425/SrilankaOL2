@@ -60,7 +60,7 @@ function LoginPanel({
   message?: string;
   onSuccess: () => Promise<void>;
 }) {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -73,9 +73,9 @@ function LoginPanel({
     setError('');
     try {
       if (mode === 'register') {
-        await register({ email, displayName, password });
+        await register({ username, displayName, password });
       } else {
-        await login(email, password);
+        await login(username, password);
       }
       await onSuccess();
     } catch (reason) {
@@ -101,7 +101,7 @@ function LoginPanel({
         <p className="muted">
           {mode === 'login'
             ? '登录后查看自己加入的游戏。'
-            : '注册后，请把邮箱提供给主持人，由主持人分配玩家或观察者身份。'}
+            : '注册后，请把用户名提供给主持人，由主持人分配玩家或观察者身份。'}
         </p>
       </div>
       <form onSubmit={(event) => void submit(event)}>
@@ -118,13 +118,13 @@ function LoginPanel({
           </label>
         )}
         <label>
-          邮箱
+          用户名
           <input
             required
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            maxLength={64}
+            autoComplete="username"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
           />
         </label>
         <label>
@@ -203,7 +203,7 @@ function GameCard({
 function GameWorkspace({ game }: { game: GameSummary }) {
   const [members, setMembers] = useState<GameMemberSummary[]>([]);
   const [countries, setCountries] = useState<CountrySummary[]>([]);
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [role, setRole] = useState<'Player' | 'Observer'>('Player');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -231,8 +231,8 @@ function GameWorkspace({ game }: { game: GameSummary }) {
     event.preventDefault();
     setError('');
     try {
-      await addMember(game.id, { email, role });
-      setEmail('');
+      await addMember(game.id, { username, role });
+      setUsername('');
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '添加成员失败');
@@ -286,7 +286,7 @@ function GameWorkspace({ game }: { game: GameSummary }) {
             <div>
               <h3>成员管理</h3>
               <p className="muted member-help">
-                用户需先完成自助注册，再由主持人按邮箱分配玩家或观察者身份。
+                用户需先完成自助注册，再由主持人按用户名分配玩家或观察者身份。
               </p>
               <form
                 className="member-form"
@@ -294,11 +294,11 @@ function GameWorkspace({ game }: { game: GameSummary }) {
               >
                 <input
                   required
-                  aria-label="成员邮箱"
-                  type="email"
-                  placeholder="成员邮箱"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
+                  aria-label="成员用户名"
+                  maxLength={64}
+                  placeholder="成员用户名"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
                 />
                 <select
                   value={role}
@@ -319,7 +319,7 @@ function GameWorkspace({ game }: { game: GameSummary }) {
                     <span>
                       <strong>{member.displayName}</strong>
                       <small>
-                        {member.email} · {member.role}
+                        {member.username} · {member.role}
                       </small>
                     </span>
                     {member.role === 'Player' ? (

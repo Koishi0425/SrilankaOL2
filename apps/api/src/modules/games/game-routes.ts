@@ -21,7 +21,7 @@ const createGameSchema = z.object({
   countryNames: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
 });
 const addMemberSchema = z.object({
-  email: z.string().email().max(320),
+  username: z.string().trim().min(1).max(64).regex(/^\S+$/u),
   role: z.enum(['Player', 'Observer']),
 });
 const assignmentSchema = z.object({

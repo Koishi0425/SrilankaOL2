@@ -12,7 +12,7 @@ import type { AuthService } from './auth-service.js';
 export const SESSION_COOKIE = 'srilanka_session';
 
 const loginSchema = z.object({
-  email: z.string().email().max(320),
+  username: z.string().trim().min(1).max(64).regex(/^\S+$/u),
   password: z.string().min(8).max(256),
 });
 const registrationSchema = loginSchema.extend({
@@ -73,7 +73,7 @@ export async function registerAuthRoutes(
         reply,
         400,
         'VALIDATION_FAILED',
-        '邮箱、显示名称或密码格式不正确。',
+        '用户名、显示名称或密码格式不正确。',
       );
     }
 
@@ -83,8 +83,8 @@ export async function registerAuthRoutes(
         request,
         reply,
         409,
-        'EMAIL_ALREADY_REGISTERED',
-        '该邮箱已经注册。',
+        'USERNAME_ALREADY_REGISTERED',
+        '该用户名已经注册。',
       );
     }
     setSessionCookie(reply, result, secureCookies);
@@ -103,18 +103,18 @@ export async function registerAuthRoutes(
         reply,
         400,
         'VALIDATION_FAILED',
-        '邮箱或密码格式不正确。',
+        '用户名或密码格式不正确。',
       );
     }
 
-    const result = await auth.login(parsed.data.email, parsed.data.password);
+    const result = await auth.login(parsed.data.username, parsed.data.password);
     if (!result) {
       return sendApiError(
         request,
         reply,
         401,
         'UNAUTHENTICATED',
-        '邮箱或密码不正确。',
+        '用户名或密码不正确。',
       );
     }
 

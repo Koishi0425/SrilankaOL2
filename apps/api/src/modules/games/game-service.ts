@@ -35,7 +35,7 @@ interface GameRow {
 interface MemberRow {
   id: string;
   user_id: string;
-  email: string;
+  username: string;
   display_name: string;
   role: GameRole;
   status: 'Invited' | 'Active' | 'Left' | 'Suspended';
@@ -205,7 +205,7 @@ export class GameService {
   ): Promise<GameMemberSummary[]> {
     await this.requireHost(gameId, userId);
     const result = await this.database.query<MemberRow>(
-      `SELECT gm.id, gm.user_id, u.email, u.display_name, gm.role, gm.status,
+      `SELECT gm.id, gm.user_id, u.username, u.display_name, gm.role, gm.status,
               gm.controlled_country_id, c.name AS controlled_country_name
        FROM game_members gm
        JOIN users u ON u.id = gm.user_id
@@ -217,7 +217,7 @@ export class GameService {
     return result.rows.map((row) => ({
       id: row.id,
       userId: row.user_id,
-      email: row.email,
+      username: row.username,
       displayName: row.display_name,
       role: row.role,
       status: row.status,
@@ -229,13 +229,13 @@ export class GameService {
   async addMember(input: {
     gameId: string;
     actorUserId: string;
-    email: string;
+    username: string;
     role: 'Player' | 'Observer';
   }): Promise<GameMemberSummary> {
     await this.requireHost(input.gameId, input.actorUserId);
     const userResult = await this.database.query<{ id: string }>(
-      `SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND status = 'Active'`,
-      [input.email.trim()],
+      `SELECT id FROM users WHERE LOWER(username) = LOWER($1) AND status = 'Active'`,
+      [input.username.trim()],
     );
     const target = userResult.rows[0];
     if (!target)

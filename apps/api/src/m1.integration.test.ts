@@ -32,25 +32,25 @@ function sessionCookie(response: { headers: Record<string, unknown> }): string {
   return setCookie.split(';', 1)[0] ?? '';
 }
 
-async function logIn(email: string, password: string): Promise<string> {
+async function logIn(username: string, password: string): Promise<string> {
   const response = await app.inject({
     method: 'POST',
     url: '/api/v1/auth/login',
-    payload: { email, password },
+    payload: { username, password },
   });
   expect(response.statusCode).toBe(200);
   return sessionCookie(response);
 }
 
 async function registerUser(
-  email: string,
+  username: string,
   displayName: string,
   password: string,
 ): Promise<string> {
   const response = await app.inject({
     method: 'POST',
     url: '/api/v1/auth/register',
-    payload: { email, displayName, password },
+    payload: { username, displayName, password },
   });
   expect(response.statusCode).toBe(201);
   return sessionCookie(response);
@@ -84,21 +84,18 @@ describe('M1 identity and game boundaries', () => {
 
   it('keeps games isolated and reserves member management for hosts', async () => {
     const host = await auth.createDevelopmentUser({
-      email: 'host@example.test',
+      username: 'host',
       displayName: 'Host',
       password: 'host-password-123',
     });
     await auth.createDevelopmentUser({
-      email: 'outsider@example.test',
+      username: 'outsider',
       displayName: 'Outsider',
       password: 'outsider-password-123',
     });
 
-    const hostCookie = await logIn('host@example.test', 'host-password-123');
-    const outsiderCookie = await logIn(
-      'outsider@example.test',
-      'outsider-password-123',
-    );
+    const hostCookie = await logIn('host', 'host-password-123');
+    const outsiderCookie = await logIn('outsider', 'outsider-password-123');
 
     const created = await app.inject({
       method: 'POST',
@@ -117,7 +114,7 @@ describe('M1 identity and game boundaries', () => {
     expect(hidden.statusCode).toBe(404);
 
     const playerCookie = await registerUser(
-      'player@example.test',
+      'player',
       'Player',
       'player-password-123',
     );
@@ -126,21 +123,17 @@ describe('M1 identity and game boundaries', () => {
       method: 'POST',
       url: `/api/v1/games/${gameId}/members`,
       headers: { cookie: hostCookie },
-      payload: { email: 'player@example.test', role: 'Player' },
+      payload: { username: 'player', role: 'Player' },
     });
     expect(added.statusCode).toBe(201);
 
-    await registerUser(
-      'observer@example.test',
-      'Observer',
-      'observer-password-123',
-    );
+    await registerUser('observer', 'Observer', 'observer-password-123');
 
     const observer = await app.inject({
       method: 'POST',
       url: `/api/v1/games/${gameId}/members`,
       headers: { cookie: hostCookie },
-      payload: { email: 'observer@example.test', role: 'Observer' },
+      payload: { username: 'observer', role: 'Observer' },
     });
     expect(observer.statusCode).toBe(201);
 
@@ -170,11 +163,11 @@ describe('M1 identity and game boundaries', () => {
     expect(members.json().data).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          email: 'player@example.test',
+          username: 'player',
           role: 'Player',
         }),
         expect.objectContaining({
-          email: 'observer@example.test',
+          username: 'observer',
           role: 'Observer',
         }),
       ]),

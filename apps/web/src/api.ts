@@ -60,19 +60,19 @@ export async function fetchMe(): Promise<MeData> {
 }
 
 export async function login(
-  email: string,
+  username: string,
   password: string,
 ): Promise<CurrentUser> {
   return (
     await apiRequest<CurrentUser>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ username, password }),
     })
   ).data;
 }
 
 export async function register(input: {
-  email: string;
+  username: string;
   displayName: string;
   password: string;
 }): Promise<CurrentUser> {
@@ -120,7 +120,7 @@ export async function fetchMembers(
 
 export async function addMember(
   gameId: string,
-  input: { email: string; role: 'Player' | 'Observer' },
+  input: { username: string; role: 'Player' | 'Observer' },
 ): Promise<GameMemberSummary> {
   return (
     await apiRequest<GameMemberSummary>(`/games/${gameId}/members`, {
