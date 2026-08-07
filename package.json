@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "pnpm -r --if-present build",
-    "build:packages": "pnpm --filter ./packages/** build",
+    "build:packages": "pnpm --filter \"./packages/**\" build",
     "predev": "pnpm build:packages",
     "dev": "pnpm --parallel --filter @srilanka/api --filter @srilanka/web --filter @srilanka/worker dev",
     "format": "prettier --write .",
