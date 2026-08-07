@@ -27,7 +27,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await Promise.all([app.close(), database.end(), redis.quit()]);
+  await Promise.all([
+    app.close(),
+    database.end(),
+    redis.isOpen ? redis.quit() : Promise.resolve(),
+  ]);
 });
 
 describe('health dependencies', () => {

@@ -1,6 +1,6 @@
 # SrilankaOL
 
-SrilankaOL 是一个由主持人驱动的多人异步战略游戏平台。本仓库当前处于 M0 工程基线阶段。
+SrilankaOL 是一个由主持人驱动的多人异步战略游戏平台。本仓库当前处于 M1 身份与游戏基础阶段。
 
 ## 工程结构
 
@@ -52,3 +52,27 @@ pnpm.cmd --filter @srilanka/api test:integration
 - 玩家权限必须由后端执行；前端隐藏不构成安全边界。
 - 共享契约不得导出数据库实体或秘密字段。
 - 正式世界状态将在 M5 后只能通过状态变更集修改。
+
+## M1 开发账号与动态端口
+
+M1 不开放公网注册。首次本地启动前，通过显式环境变量创建或更新开发账号：
+
+```powershell
+$env:SEED_HOST_EMAIL = 'host@example.local'
+$env:SEED_HOST_PASSWORD = 'replace-with-at-least-8-characters'
+$env:SEED_HOST_NAME = 'Local Host'
+pnpm.cmd db:migrate
+pnpm.cmd --filter @srilanka/api seed:dev
+```
+
+若 Windows 保留了默认 API 端口，可让 API 使用可用端口，并让 Vite 代理到该地址。浏览器仍访问 `http://localhost:5173`，无需把 `VITE_API_BASE_URL` 改成跨域地址：
+
+```powershell
+$env:HOST = '127.0.0.1'
+$env:PORT = '6369'
+$env:VITE_API_BASE_URL = '/api/v1'
+$env:VITE_API_PROXY_TARGET = 'http://127.0.0.1:6369'
+pnpm.cmd dev
+```
+
+登录后可以创建游戏和初始国家；新游戏会自动生成主持人成员关系和第 1 年春季的准备中季度。成员管理、国家分配及跨游戏访问均由 API 强制鉴权。

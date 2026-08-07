@@ -3,10 +3,14 @@ import { checkDatabase, createDatabasePool } from '@srilanka/database';
 import { createClient } from 'redis';
 
 import { buildApp } from './app.js';
+import { AuthService } from './modules/auth/auth-service.js';
+import { GameService } from './modules/games/game-service.js';
 
 const config = loadServiceConfig();
 const database = createDatabasePool(config.databaseUrl);
 const redis = createClient({ url: config.redisUrl });
+const auth = new AuthService(database);
+const games = new GameService(database);
 let redisConnection: Promise<void> | undefined;
 
 async function ensureRedis(): Promise<void> {
@@ -24,6 +28,9 @@ async function ensureRedis(): Promise<void> {
 const app = await buildApp({
   logLevel: config.logLevel,
   webOrigin: config.webOrigin,
+  auth,
+  games,
+  secureCookies: config.nodeEnv === 'production',
   health: {
     checkDatabase: () => checkDatabase(database),
     checkRedis: async () => {

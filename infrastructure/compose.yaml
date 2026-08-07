@@ -3,6 +3,7 @@ name: srilankaol
 services:
   database:
     image: postgres:17-alpine
+    # 以下账号仅用于本地开发；公开部署前必须改为外部密钥或安全的环境变量注入。
     environment:
       POSTGRES_USER: srilanka
       POSTGRES_PASSWORD: srilanka
@@ -34,6 +35,7 @@ services:
     image: minio/minio:latest
     command: server /data --console-address :9001
     environment:
+      # MinIO 本地管理账号。不要在共享或生产环境继续使用这些示例值。
       MINIO_ROOT_USER: srilanka
       MINIO_ROOT_PASSWORD: change-me-now
     ports:
@@ -47,6 +49,7 @@ services:
       context: ..
       dockerfile: infrastructure/docker/api.Dockerfile
     environment:
+      # 容器内服务通过 Compose 服务名互联，因此这里使用 database、redis 和 object-storage，不能写 localhost。
       NODE_ENV: development
       DATABASE_URL: postgresql://srilanka:srilanka@database:5432/srilanka_dev
       REDIS_URL: redis://redis:6379/0
@@ -56,6 +59,7 @@ services:
       OBJECT_STORAGE_ACCESS_KEY: srilanka
       OBJECT_STORAGE_SECRET_KEY: change-me-now
     ports:
+      # 如果宿主机 3000 端口不可用，只修改冒号左侧，例如 '6369:3000'；容器内端口仍为 3000。
       - '3000:3000'
     depends_on:
       database:
@@ -80,6 +84,7 @@ services:
       context: ..
       dockerfile: infrastructure/docker/web.Dockerfile
     ports:
+      # 如果宿主机 5173 已被占用，可改为 '5174:80'，并同步修改 WEB_ORIGIN。
       - '5173:80'
     depends_on:
       - api
