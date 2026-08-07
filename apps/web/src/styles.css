@@ -351,6 +351,123 @@ footer {
   font-size: 0.86rem;
 }
 
+.map-shell {
+  margin-top: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  overflow: hidden;
+  background: #0c1715;
+}
+
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: rgba(22, 40, 35, 0.96);
+}
+
+.map-toolbar h3,
+.map-toolbar p {
+  margin: 0;
+}
+
+.map-search {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.search-results {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.65rem 1rem;
+  overflow-x: auto;
+}
+
+.search-results button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  color: var(--text);
+  background: transparent;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.map-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 19rem;
+  min-height: 520px;
+}
+
+.hex-map {
+  width: 100%;
+  height: 520px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.hex-map:active {
+  cursor: grabbing;
+}
+
+.tile-panel {
+  padding: 1rem;
+  border-left: 1px solid var(--line);
+  background: rgba(18, 31, 28, 0.97);
+  overflow-y: auto;
+}
+
+.tile-panel__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.tile-panel dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.45rem 0.8rem;
+}
+
+.tile-panel dt {
+  color: var(--muted);
+}
+
+.tile-panel dd {
+  margin: 0;
+  text-align: right;
+}
+
+.army-entry {
+  display: block;
+}
+
+.army-entry button {
+  margin-left: 0.4rem;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+}
+
+.map-editor {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.map-editor form,
+.map-editor label {
+  display: grid;
+  gap: 0.45rem;
+}
+
 .member-list {
   display: grid;
   gap: 0.6rem;
@@ -376,6 +493,22 @@ footer {
 
   .quarter-chip {
     text-align: left;
+  }
+
+  .map-toolbar,
+  .map-layout {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .map-search {
+    margin-left: 0;
+  }
+
+  .tile-panel {
+    border-top: 1px solid var(--line);
+    border-left: 0;
   }
 }
 

@@ -20,6 +20,7 @@ import {
   logout,
   register,
 } from './api.js';
+import { HexMap } from './map/HexMap.js';
 
 type SessionState =
   | { kind: 'loading' }
@@ -267,87 +268,90 @@ function GameWorkspace({ game }: { game: GameSummary }) {
       {loading && <p className="muted">正在读取游戏上下文…</p>}
       {error && <p className="form-error">{error}</p>}
       {!loading && (
-        <div className="context-grid">
-          <div>
-            <h3>国家</h3>
-            <div className="tag-list">
-              {countries.map((country) => (
-                <span className="tag" key={country.id}>
-                  {country.name}
-                </span>
-              ))}
-              {countries.length === 0 && (
-                <span className="muted">暂无国家</span>
-              )}
-            </div>
-          </div>
-
-          {canManage && (
+        <>
+          <HexMap game={game} countries={countries} />
+          <div className="context-grid">
             <div>
-              <h3>成员管理</h3>
-              <p className="muted member-help">
-                用户需先完成自助注册，再由主持人按用户名分配玩家或观察者身份。
-              </p>
-              <form
-                className="member-form"
-                onSubmit={(event) => void submitMember(event)}
-              >
-                <input
-                  required
-                  aria-label="成员用户名"
-                  maxLength={64}
-                  placeholder="成员用户名"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                />
-                <select
-                  value={role}
-                  onChange={(event) =>
-                    setRole(event.target.value as 'Player' | 'Observer')
-                  }
-                >
-                  <option value="Player">玩家</option>
-                  <option value="Observer">观察者</option>
-                </select>
-                <button className="button" type="submit">
-                  添加
-                </button>
-              </form>
-              <div className="member-list">
-                {members.map((member) => (
-                  <div className="member-row" key={member.id}>
-                    <span>
-                      <strong>{member.displayName}</strong>
-                      <small>
-                        {member.username} · {member.role}
-                      </small>
-                    </span>
-                    {member.role === 'Player' ? (
-                      <select
-                        aria-label={`为 ${member.displayName} 分配国家`}
-                        value={member.controlledCountryId ?? ''}
-                        onChange={(event) =>
-                          void changeCountry(member.id, event.target.value)
-                        }
-                      >
-                        <option value="">未分配国家</option>
-                        {countries.map((country) => (
-                          <option key={country.id} value={country.id}>
-                            {country.name}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className="muted">
-                        {member.controlledCountryName ?? '—'}
-                      </span>
-                    )}
-                  </div>
+              <h3>国家</h3>
+              <div className="tag-list">
+                {countries.map((country) => (
+                  <span className="tag" key={country.id}>
+                    {country.name}
+                  </span>
                 ))}
+                {countries.length === 0 && (
+                  <span className="muted">暂无国家</span>
+                )}
               </div>
             </div>
-          )}
-        </div>
+
+            {canManage && (
+              <div>
+                <h3>成员管理</h3>
+                <p className="muted member-help">
+                  用户需先完成自助注册，再由主持人按用户名分配玩家或观察者身份。
+                </p>
+                <form
+                  className="member-form"
+                  onSubmit={(event) => void submitMember(event)}
+                >
+                  <input
+                    required
+                    aria-label="成员用户名"
+                    maxLength={64}
+                    placeholder="成员用户名"
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value)}
+                  />
+                  <select
+                    value={role}
+                    onChange={(event) =>
+                      setRole(event.target.value as 'Player' | 'Observer')
+                    }
+                  >
+                    <option value="Player">玩家</option>
+                    <option value="Observer">观察者</option>
+                  </select>
+                  <button className="button" type="submit">
+                    添加
+                  </button>
+                </form>
+                <div className="member-list">
+                  {members.map((member) => (
+                    <div className="member-row" key={member.id}>
+                      <span>
+                        <strong>{member.displayName}</strong>
+                        <small>
+                          {member.username} · {member.role}
+                        </small>
+                      </span>
+                      {member.role === 'Player' ? (
+                        <select
+                          aria-label={`为 ${member.displayName} 分配国家`}
+                          value={member.controlledCountryId ?? ''}
+                          onChange={(event) =>
+                            void changeCountry(member.id, event.target.value)
+                          }
+                        >
+                          <option value="">未分配国家</option>
+                          {countries.map((country) => (
+                            <option key={country.id} value={country.id}>
+                              {country.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="muted">
+                          {member.controlledCountryName ?? '—'}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
       )}
     </section>
   );

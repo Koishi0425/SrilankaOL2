@@ -260,12 +260,20 @@ export class GameService {
     userId: string,
   ): Promise<CountrySummary[]> {
     await this.getForUser(gameId, userId);
-    const result = await this.database.query<CountrySummary>(
-      `SELECT id, name FROM countries
+    const result = await this.database.query<{
+      id: string;
+      name: string;
+      map_color: string;
+    }>(
+      `SELECT id, name, map_color FROM countries
        WHERE game_id = $1 AND status = 'Active' ORDER BY name`,
       [gameId],
     );
-    return result.rows;
+    return result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      mapColor: row.map_color,
+    }));
   }
 
   async assignCountry(input: {

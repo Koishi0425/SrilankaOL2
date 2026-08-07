@@ -11,6 +11,8 @@ import { registerAuthRoutes } from './modules/auth/auth-routes.js';
 import type { AuthService } from './modules/auth/auth-service.js';
 import { registerGameRoutes } from './modules/games/game-routes.js';
 import type { GameService } from './modules/games/game-service.js';
+import { registerWorldRoutes } from './modules/world/world-routes.js';
+import type { WorldService } from './modules/world/world-service.js';
 import { resolveRequestId } from './request-id.js';
 
 export interface AppOptions {
@@ -19,6 +21,7 @@ export interface AppOptions {
   webOrigin?: string;
   auth?: AuthService;
   games?: GameService;
+  world?: WorldService;
   secureCookies?: boolean;
 }
 
@@ -87,6 +90,9 @@ export async function buildApp(options: AppOptions) {
         options.secureCookies ?? false,
       );
       await registerGameRoutes(routes, options.auth!, options.games!);
+      if (options.world) {
+        await registerWorldRoutes(routes, options.auth!, options.world);
+      }
     });
   }
 

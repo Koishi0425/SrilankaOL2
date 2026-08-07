@@ -5,12 +5,14 @@ import { createClient } from 'redis';
 import { buildApp } from './app.js';
 import { AuthService } from './modules/auth/auth-service.js';
 import { GameService } from './modules/games/game-service.js';
+import { WorldService } from './modules/world/world-service.js';
 
 const config = loadServiceConfig();
 const database = createDatabasePool(config.databaseUrl);
 const redis = createClient({ url: config.redisUrl });
 const auth = new AuthService(database);
 const games = new GameService(database);
+const world = new WorldService(database);
 let redisConnection: Promise<void> | undefined;
 
 async function ensureRedis(): Promise<void> {
@@ -30,6 +32,7 @@ const app = await buildApp({
   webOrigin: config.webOrigin,
   auth,
   games,
+  world,
   secureCookies: config.nodeEnv === 'production',
   health: {
     checkDatabase: () => checkDatabase(database),

@@ -3,6 +3,7 @@ import { createDatabasePool } from '@srilanka/database';
 
 import { AuthService } from './modules/auth/auth-service.js';
 import { GameService } from './modules/games/game-service.js';
+import { WorldService } from './modules/world/world-service.js';
 
 const config = loadServiceConfig();
 if (config.nodeEnv === 'production') {
@@ -28,18 +29,22 @@ try {
 
   const games = new GameService(database);
   const accessibleGames = await games.listForUser(user.id);
-  if (accessibleGames.length === 0) {
+  let game = accessibleGames[0];
+  if (!game) {
     const countryNames = (process.env.SEED_COUNTRY_NAMES ?? '')
       .split(/[，,]/)
       .map((name) => name.trim())
       .filter(Boolean);
-    const game = await games.create({
+    game = await games.create({
       userId: user.id,
       name: process.env.SEED_GAME_NAME?.trim() || 'Srilanka Campaign',
       countryNames,
     });
     process.stdout.write(`Development game ready: ${game.name}\n`);
   }
+  const world = new WorldService(database);
+  const map = await world.initializeDevelopmentMap(game.id, user.id);
+  process.stdout.write(`Development map ready: ${map.name}\n`);
 } finally {
   await database.end();
 }

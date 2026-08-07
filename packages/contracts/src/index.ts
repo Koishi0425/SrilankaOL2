@@ -101,4 +101,75 @@ export interface GameMemberSummary {
 export interface CountrySummary {
   id: string;
   name: string;
+  mapColor: string;
+}
+
+export interface MapMetadata {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  orientation: 'Pointy' | 'Flat';
+  minZoom: number;
+  maxZoom: number;
+  currentWorldVersion: number;
+  availableLayers: Array<'terrain' | 'control' | 'city' | 'army'>;
+}
+
+export interface MapCityMarker {
+  id: string;
+  name: string;
+  importance: number;
+  status: string;
+}
+
+export interface MapArmyMarker {
+  id: string;
+  name: string;
+  strength: number;
+  status: string;
+  countryId: string;
+}
+
+export interface MapTileSummary {
+  id: string;
+  q: number;
+  r: number;
+  terrainKey: string;
+  terrainName: string;
+  terrainColor: string;
+  regionId: string | null;
+  regionName: string | null;
+  controllerCountryId: string | null;
+  controllerCountryName: string | null;
+  controllerColor: string | null;
+  passable: boolean;
+  movementCost: number;
+  cities: MapCityMarker[];
+  armies: MapArmyMarker[];
+}
+
+export interface MapViewportData {
+  mapId: string;
+  worldVersion: number;
+  bounds: { minQ: number; maxQ: number; minR: number; maxR: number };
+  tiles: MapTileSummary[];
+}
+
+export interface TileDetails extends MapTileSummary {
+  provinceName: string | null;
+  legalOwnerCountryName: string | null;
+  occupierCountryName: string | null;
+  elevation: number;
+  roadLevel: number;
+  notes?: string;
+}
+
+export interface MapSearchResult {
+  id: string;
+  type: 'Tile' | 'Region' | 'City' | 'Army';
+  name: string;
+  tileId: string | null;
+  q: number | null;
+  r: number | null;
 }

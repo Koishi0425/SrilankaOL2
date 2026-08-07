@@ -6,7 +6,11 @@ import type {
   GameDetails,
   GameMemberSummary,
   HealthResponse,
+  MapMetadata,
+  MapSearchResult,
+  MapViewportData,
   MeData,
+  TileDetails,
 } from '@srilanka/contracts';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
@@ -145,6 +149,100 @@ export async function assignCountry(
           countryId,
           role: 'PrimaryController',
         }),
+      },
+    )
+  ).data;
+}
+
+export async function fetchMap(gameId: string): Promise<MapMetadata> {
+  return (await apiRequest<MapMetadata>(`/games/${gameId}/map`)).data;
+}
+
+export async function fetchMapViewport(
+  gameId: string,
+  bounds: { minQ: number; maxQ: number; minR: number; maxR: number },
+  signal?: AbortSignal,
+): Promise<MapViewportData> {
+  const query = new URLSearchParams(
+    Object.entries(bounds).map(([key, value]) => [key, String(value)]),
+  );
+  return (
+    await apiRequest<MapViewportData>(
+      `/games/${gameId}/map/viewport?${query}`,
+      {
+        signal,
+      },
+    )
+  ).data;
+}
+
+export async function fetchTile(
+  gameId: string,
+  tileId: string,
+): Promise<TileDetails> {
+  return (await apiRequest<TileDetails>(`/games/${gameId}/tiles/${tileId}`))
+    .data;
+}
+
+export async function searchMap(
+  gameId: string,
+  query: string,
+): Promise<MapSearchResult[]> {
+  return (
+    await apiRequest<MapSearchResult[]>(
+      `/games/${gameId}/map/search?q=${encodeURIComponent(query)}`,
+    )
+  ).data;
+}
+
+export async function updateTileControl(
+  gameId: string,
+  tileId: string,
+  controllerCountryId: string | null,
+): Promise<TileDetails> {
+  return (
+    await apiRequest<TileDetails>(`/games/${gameId}/tiles/${tileId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ controllerCountryId }),
+    })
+  ).data;
+}
+
+export async function createCity(
+  gameId: string,
+  input: { tileId: string; name: string; countryId?: string | null },
+): Promise<TileDetails> {
+  return (
+    await apiRequest<TileDetails>(`/games/${gameId}/cities`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  ).data;
+}
+
+export async function createArmy(
+  gameId: string,
+  input: { tileId: string; name: string; countryId: string; strength: number },
+): Promise<TileDetails> {
+  return (
+    await apiRequest<TileDetails>(`/games/${gameId}/armies`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  ).data;
+}
+
+export async function moveArmy(
+  gameId: string,
+  armyId: string,
+  tileId: string,
+): Promise<TileDetails> {
+  return (
+    await apiRequest<TileDetails>(
+      `/games/${gameId}/armies/${armyId}/location`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ tileId }),
       },
     )
   ).data;

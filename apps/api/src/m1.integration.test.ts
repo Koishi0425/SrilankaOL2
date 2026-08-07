@@ -7,12 +7,14 @@ import { createClient } from 'redis';
 import { buildApp } from './app.js';
 import { AuthService } from './modules/auth/auth-service.js';
 import { GameService } from './modules/games/game-service.js';
+import { WorldService } from './modules/world/world-service.js';
 
 const config = loadServiceConfig({ ...process.env, NODE_ENV: 'test' });
 const database = createDatabasePool(config.databaseUrl);
 const redis = createClient({ url: config.redisUrl });
 const auth = new AuthService(database);
 const games = new GameService(database);
+const world = new WorldService(database);
 
 const app = await buildApp({
   health: {
@@ -23,6 +25,7 @@ const app = await buildApp({
   },
   auth,
   games,
+  world,
 });
 
 function sessionCookie(response: { headers: Record<string, unknown> }): string {
@@ -105,6 +108,7 @@ describe('M1 identity and game boundaries', () => {
     });
     expect(created.statusCode).toBe(201);
     const gameId = created.json().data.id as string;
+    await world.initializeDevelopmentMap(gameId, host.id);
 
     const hidden = await app.inject({
       method: 'GET',
@@ -126,6 +130,81 @@ describe('M1 identity and game boundaries', () => {
       payload: { username: 'player', role: 'Player' },
     });
     expect(added.statusCode).toBe(201);
+
+    const viewport = await app.inject({
+      method: 'GET',
+      url: `/api/v1/games/${gameId}/map/viewport?minQ=1&maxQ=3&minR=1&maxR=3`,
+      headers: { cookie: playerCookie },
+    });
+    expect(viewport.statusCode).toBe(200);
+    expect(viewport.json().data.tiles).toHaveLength(9);
+    expect(viewport.json().data.tiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ q: 1, r: 1 }),
+        expect.objectContaining({ q: 3, r: 3 }),
+      ]),
+    );
+    const tileId = viewport.json().data.tiles[0].id as string;
+
+    const forbiddenEdit = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/games/${gameId}/tiles/${tileId}`,
+      headers: { cookie: playerCookie },
+      payload: { notes: 'player edit' },
+    });
+    expect(forbiddenEdit.statusCode).toBe(403);
+
+    const invalidCity = await app.inject({
+      method: 'POST',
+      url: `/api/v1/games/${gameId}/cities`,
+      headers: { cookie: hostCookie },
+      payload: { tileId: randomUUID(), name: 'Nowhere' },
+    });
+    expect(invalidCity.statusCode).toBe(404);
+
+    const city = await app.inject({
+      method: 'POST',
+      url: `/api/v1/games/${gameId}/cities`,
+      headers: { cookie: hostCookie },
+      payload: { tileId, name: 'Matale' },
+    });
+    expect(city.statusCode).toBe(201);
+    expect(city.json().data.cities).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'Matale' })]),
+    );
+
+    const country = await database.query<{ id: string }>(
+      'SELECT id FROM countries WHERE game_id = $1 ORDER BY name LIMIT 1',
+      [gameId],
+    );
+    const army = await app.inject({
+      method: 'POST',
+      url: `/api/v1/games/${gameId}/armies`,
+      headers: { cookie: hostCookie },
+      payload: {
+        tileId,
+        countryId: country.rows[0]!.id,
+        name: 'Test Guard',
+        strength: 800,
+      },
+    });
+    expect(army.statusCode).toBe(201);
+    const armyId = army
+      .json()
+      .data.armies.find(
+        (candidate: { name: string }) => candidate.name === 'Test Guard',
+      ).id as string;
+    const destinationTileId = viewport.json().data.tiles.at(-1).id as string;
+    const moved = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/games/${gameId}/armies/${armyId}/location`,
+      headers: { cookie: hostCookie },
+      payload: { tileId: destinationTileId },
+    });
+    expect(moved.statusCode).toBe(200);
+    expect(moved.json().data.armies).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: armyId })]),
+    );
 
     await registerUser('observer', 'Observer', 'observer-password-123');
 
@@ -189,3 +268,4 @@ describe('M1 identity and game boundaries', () => {
     expect(hostMembership.rows[0]?.role).toBe('Host');
   });
 });
+import { randomUUID } from 'node:crypto';
