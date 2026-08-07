@@ -375,14 +375,25 @@ export class WorldService {
     tileId: string,
   ): Promise<MapTileSummary[]> {
     const tile = await this.getTile(gameId, userId, tileId);
-    const coordinates = [
-      [1, 0],
-      [1, -1],
-      [0, -1],
-      [-1, 0],
-      [-1, 1],
-      [0, 1],
-    ];
+    // q/r uses an odd-row offset grid, so diagonal neighbors depend on row parity.
+    const coordinates =
+      Math.abs(tile.r % 2) === 1
+        ? [
+            [1, 0],
+            [-1, 0],
+            [0, -1],
+            [1, -1],
+            [0, 1],
+            [1, 1],
+          ]
+        : [
+            [1, 0],
+            [-1, 0],
+            [-1, -1],
+            [0, -1],
+            [-1, 1],
+            [0, 1],
+          ];
     const result = await this.getViewport({
       gameId,
       userId,

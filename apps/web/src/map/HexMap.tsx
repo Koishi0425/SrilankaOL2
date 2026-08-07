@@ -100,6 +100,25 @@ export function HexMap({
     return () => window.removeEventListener('resize', resize);
   }, []);
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const factor = event.deltaY < 0 ? 1.12 : 0.89;
+      setView((current) => ({
+        ...current,
+        scale: Math.min(
+          metadata?.maxZoom ?? 3,
+          Math.max(metadata?.minZoom ?? 0.5, current.scale * factor),
+        ),
+      }));
+    };
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleWheel);
+  }, [metadata?.maxZoom, metadata?.minZoom]);
+
   const bounds = useMemo(() => {
     const raw = visibleBounds(size.width, size.height, view, HEX_SIZE);
     return metadata
@@ -321,17 +340,6 @@ export function HexMap({
                 (tile) => tile.q === coordinate.q && tile.r === coordinate.r,
               ),
             );
-          }}
-          onWheel={(event) => {
-            event.preventDefault();
-            const factor = event.deltaY < 0 ? 1.12 : 0.89;
-            setView((current) => ({
-              ...current,
-              scale: Math.min(
-                metadata?.maxZoom ?? 3,
-                Math.max(metadata?.minZoom ?? 0.5, current.scale * factor),
-              ),
-            }));
           }}
         />
         <aside className="tile-panel">

@@ -5,16 +5,23 @@ export interface ViewTransform {
 }
 
 export function axialToPixel(q: number, r: number, size: number) {
+  // Persisted q/r coordinates use an odd-row offset grid so rectangular
+  // coordinate ranges also have a rectangular map outline.
+  const axialQ = q - (r - (r & 1)) / 2;
   return {
-    x: size * Math.sqrt(3) * (q + r / 2),
+    x: size * Math.sqrt(3) * (axialQ + r / 2),
     y: size * 1.5 * r,
   };
 }
 
 export function pixelToAxial(x: number, y: number, size: number) {
-  const q = ((Math.sqrt(3) / 3) * x - y / 3) / size;
+  const axialQ = ((Math.sqrt(3) / 3) * x - y / 3) / size;
   const r = ((2 / 3) * y) / size;
-  return roundAxial(q, r);
+  const axial = roundAxial(axialQ, r);
+  return {
+    q: axial.q + (axial.r - (axial.r & 1)) / 2,
+    r: axial.r,
+  };
 }
 
 function roundAxial(q: number, r: number) {

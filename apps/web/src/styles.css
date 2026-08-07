@@ -407,6 +407,7 @@ footer {
   height: 520px;
   cursor: grab;
   touch-action: none;
+  overscroll-behavior: contain;
 }
 
 .hex-map:active {
