@@ -71,6 +71,29 @@ describe('App', () => {
           meta: { requestId: 'req_me' },
         });
       }
+      if (url.endsWith('/countries')) {
+        return jsonResponse({
+          data: [{ id: '00000000-0000-4000-8000-000000000004', name: 'Kandy' }],
+          meta: { requestId: 'req_countries' },
+        });
+      }
+      if (url.endsWith('/members')) {
+        return jsonResponse({
+          data: [
+            {
+              id: '00000000-0000-4000-8000-000000000005',
+              userId: '00000000-0000-4000-8000-000000000001',
+              email: 'host@example.test',
+              displayName: 'Host',
+              role: 'Host',
+              status: 'Active',
+              controlledCountryId: null,
+              controlledCountryName: null,
+            },
+          ],
+          meta: { requestId: 'req_members' },
+        });
+      }
       return jsonResponse(
         {
           error: {
@@ -95,7 +118,92 @@ describe('App', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
-    expect(await screen.findByText('Northern Passage')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Northern Passage',
+        level: 2,
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByText('欢迎回来，Host')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '创建游戏' }),
+    ).not.toBeInTheDocument();
+    expect(await screen.findByText('成员管理')).toBeInTheDocument();
+  });
+
+  it('registers a new user from the login panel', async () => {
+    let authenticated = false;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/health')) {
+        return jsonResponse({
+          data: {
+            status: 'ok',
+            service: 'api',
+            version: '0.0.0',
+            dependencies: { database: 'up', redis: 'up' },
+          },
+          meta: { requestId: 'req_health' },
+        });
+      }
+      if (url.endsWith('/auth/register') && init?.method === 'POST') {
+        authenticated = true;
+        return jsonResponse(
+          {
+            data: {
+              id: '00000000-0000-4000-8000-000000000010',
+              email: 'new@example.test',
+              displayName: 'New Player',
+              systemRole: 'User',
+            },
+            meta: { requestId: 'req_register' },
+          },
+          201,
+        );
+      }
+      if (url.endsWith('/me') && authenticated) {
+        return jsonResponse({
+          data: {
+            id: '00000000-0000-4000-8000-000000000010',
+            email: 'new@example.test',
+            displayName: 'New Player',
+            systemRole: 'User',
+            unreadNotificationCount: 0,
+            games: [],
+          },
+          meta: { requestId: 'req_me' },
+        });
+      }
+      return jsonResponse(
+        {
+          error: {
+            code: 'UNAUTHENTICATED',
+            message: 'Authentication required',
+            details: {},
+            retryable: false,
+          },
+          meta: { requestId: 'req_guest' },
+        },
+        401,
+      );
+    });
+
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: '没有账号？立即注册' }),
+    );
+    fireEvent.change(screen.getByLabelText('显示名称'), {
+      target: { value: 'New Player' },
+    });
+    fireEvent.change(screen.getByLabelText('邮箱'), {
+      target: { value: 'new@example.test' },
+    });
+    fireEvent.change(screen.getByLabelText('密码'), {
+      target: { value: 'new-player-password' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '注册' }));
+
+    expect(await screen.findByText('欢迎回来，New Player')).toBeInTheDocument();
+    expect(screen.getByText('尚未加入游戏')).toBeInTheDocument();
   });
 });

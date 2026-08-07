@@ -342,8 +342,13 @@ footer {
 
 .member-form {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
   gap: 0.6rem;
+}
+
+.member-help {
+  margin-top: -0.25rem;
+  font-size: 0.86rem;
 }
 
 .member-list {

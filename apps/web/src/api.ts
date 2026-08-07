@@ -71,6 +71,19 @@ export async function login(
   ).data;
 }
 
+export async function register(input: {
+  email: string;
+  displayName: string;
+  password: string;
+}): Promise<CurrentUser> {
+  return (
+    await apiRequest<CurrentUser>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  ).data;
+}
+
 export async function logout(): Promise<void> {
   await apiRequest('/auth/logout', { method: 'POST' });
 }

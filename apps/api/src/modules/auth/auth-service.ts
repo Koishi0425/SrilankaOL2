@@ -94,6 +94,37 @@ export interface LoginResult {
 export class AuthService {
   constructor(private readonly database: DatabasePool) {}
 
+  private async createSession(row: UserRow): Promise<LoginResult> {
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
+    await this.database.query(
+      `INSERT INTO auth_sessions (id, user_id, token_hash, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [randomUUID(), row.id, hashSessionToken(token), expiresAt],
+    );
+    return { token, expiresAt, user: toCurrentUser(row) };
+  }
+
+  async register(input: {
+    email: string;
+    displayName: string;
+    password: string;
+  }): Promise<LoginResult | null> {
+    const result = await this.database.query<UserRow>(
+      `INSERT INTO users (id, email, display_name, password_hash)
+       VALUES ($1, LOWER($2), $3, $4)
+       ON CONFLICT ((LOWER(email))) DO NOTHING
+       RETURNING id, email, display_name, password_hash, system_role`,
+      [
+        randomUUID(),
+        input.email.trim(),
+        input.displayName.trim(),
+        await hashPassword(input.password),
+      ],
+    );
+    return result.rows[0] ? this.createSession(result.rows[0]) : null;
+  }
+
   async login(email: string, password: string): Promise<LoginResult | null> {
     const result = await this.database.query<UserRow>(
       `SELECT id, email, display_name, password_hash, system_role
@@ -105,15 +136,7 @@ export class AuthService {
     if (!row || !(await verifyPassword(password, row.password_hash)))
       return null;
 
-    const token = randomBytes(32).toString('base64url');
-    const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
-    await this.database.query(
-      `INSERT INTO auth_sessions (id, user_id, token_hash, expires_at)
-       VALUES ($1, $2, $3, $4)`,
-      [randomUUID(), row.id, hashSessionToken(token), expiresAt],
-    );
-
-    return { token, expiresAt, user: toCurrentUser(row) };
+    return this.createSession(row);
   }
 
   async authenticate(token: string | undefined): Promise<CurrentUser | null> {

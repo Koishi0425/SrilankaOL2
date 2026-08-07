@@ -2,6 +2,7 @@ import { loadServiceConfig } from '@srilanka/config';
 import { createDatabasePool } from '@srilanka/database';
 
 import { AuthService } from './modules/auth/auth-service.js';
+import { GameService } from './modules/games/game-service.js';
 
 const config = loadServiceConfig();
 if (config.nodeEnv === 'production') {
@@ -24,6 +25,21 @@ try {
     systemRole: 'User',
   });
   process.stdout.write(`Development host ready: ${user.email}\n`);
+
+  const games = new GameService(database);
+  const accessibleGames = await games.listForUser(user.id);
+  if (accessibleGames.length === 0) {
+    const countryNames = (process.env.SEED_COUNTRY_NAMES ?? '')
+      .split(/[，,]/)
+      .map((name) => name.trim())
+      .filter(Boolean);
+    const game = await games.create({
+      userId: user.id,
+      name: process.env.SEED_GAME_NAME?.trim() || 'Srilanka Campaign',
+      countryNames,
+    });
+    process.stdout.write(`Development game ready: ${game.name}\n`);
+  }
 } finally {
   await database.end();
 }

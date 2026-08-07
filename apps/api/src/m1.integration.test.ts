@@ -42,6 +42,20 @@ async function logIn(email: string, password: string): Promise<string> {
   return sessionCookie(response);
 }
 
+async function registerUser(
+  email: string,
+  displayName: string,
+  password: string,
+): Promise<string> {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/register',
+    payload: { email, displayName, password },
+  });
+  expect(response.statusCode).toBe(201);
+  return sessionCookie(response);
+}
+
 beforeAll(async () => {
   await redis.connect();
 });
@@ -75,15 +89,15 @@ describe('M1 identity and game boundaries', () => {
       password: 'host-password-123',
     });
     await auth.createDevelopmentUser({
-      email: 'player@example.test',
-      displayName: 'Player',
-      password: 'player-password-123',
+      email: 'outsider@example.test',
+      displayName: 'Outsider',
+      password: 'outsider-password-123',
     });
 
     const hostCookie = await logIn('host@example.test', 'host-password-123');
-    const playerCookie = await logIn(
-      'player@example.test',
-      'player-password-123',
+    const outsiderCookie = await logIn(
+      'outsider@example.test',
+      'outsider-password-123',
     );
 
     const created = await app.inject({
@@ -98,9 +112,15 @@ describe('M1 identity and game boundaries', () => {
     const hidden = await app.inject({
       method: 'GET',
       url: `/api/v1/games/${gameId}`,
-      headers: { cookie: playerCookie },
+      headers: { cookie: outsiderCookie },
     });
     expect(hidden.statusCode).toBe(404);
+
+    const playerCookie = await registerUser(
+      'player@example.test',
+      'Player',
+      'player-password-123',
+    );
 
     const added = await app.inject({
       method: 'POST',
@@ -109,6 +129,20 @@ describe('M1 identity and game boundaries', () => {
       payload: { email: 'player@example.test', role: 'Player' },
     });
     expect(added.statusCode).toBe(201);
+
+    await registerUser(
+      'observer@example.test',
+      'Observer',
+      'observer-password-123',
+    );
+
+    const observer = await app.inject({
+      method: 'POST',
+      url: `/api/v1/games/${gameId}/members`,
+      headers: { cookie: hostCookie },
+      payload: { email: 'observer@example.test', role: 'Observer' },
+    });
+    expect(observer.statusCode).toBe(201);
 
     const playerGames = await app.inject({
       method: 'GET',
@@ -127,6 +161,33 @@ describe('M1 identity and game boundaries', () => {
     });
     expect(forbidden.statusCode).toBe(403);
     expect(forbidden.json().error.code).toBe('HOST_PERMISSION_REQUIRED');
+
+    const members = await app.inject({
+      method: 'GET',
+      url: `/api/v1/games/${gameId}/members`,
+      headers: { cookie: hostCookie },
+    });
+    expect(members.json().data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          email: 'player@example.test',
+          role: 'Player',
+        }),
+        expect.objectContaining({
+          email: 'observer@example.test',
+          role: 'Observer',
+        }),
+      ]),
+    );
+
+    const duplicateGame = await app.inject({
+      method: 'POST',
+      url: '/api/v1/games',
+      headers: { cookie: hostCookie },
+      payload: { name: 'Second active game', countryNames: [] },
+    });
+    expect(duplicateGame.statusCode).toBe(409);
+    expect(duplicateGame.json().error.code).toBe('ACTIVE_GAME_ALREADY_EXISTS');
 
     const hostMembership = await database.query(
       `SELECT role FROM game_members WHERE game_id = $1 AND user_id = $2`,

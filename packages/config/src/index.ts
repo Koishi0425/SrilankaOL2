@@ -1,4 +1,22 @@
+import { fileURLToPath } from 'node:url';
+
 import { z } from 'zod';
+
+let workspaceEnvironmentLoaded = false;
+
+function loadWorkspaceEnvironment(): void {
+  if (workspaceEnvironmentLoaded) return;
+
+  const environmentFile = fileURLToPath(
+    new URL('../../../.env', import.meta.url),
+  );
+  try {
+    process.loadEnvFile(environmentFile);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  workspaceEnvironmentLoaded = true;
+}
 
 const environmentSchema = z.enum(['development', 'test', 'production']);
 
@@ -35,6 +53,8 @@ const rawConfigSchema = z.object({
 export function loadServiceConfig(
   source: NodeJS.ProcessEnv = process.env,
 ): ServiceConfig {
+  // 仅在调用者使用真实进程环境时读取仓库根目录 .env；测试传入的隔离配置不会被本地文件污染。
+  if (source === process.env) loadWorkspaceEnvironment();
   const parsed = rawConfigSchema.parse(source);
   const isTest = parsed.NODE_ENV === 'test';
 

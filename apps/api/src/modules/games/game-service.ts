@@ -109,6 +109,20 @@ export class GameService {
 
     try {
       await client.query('BEGIN');
+      // 与数据库唯一索引共同防止两个并发请求同时建立活动游戏。
+      await client.query('SELECT pg_advisory_xact_lock($1)', [1_936_445_701]);
+      const activeGame = await client.query<{ id: string }>(
+        `SELECT id FROM games
+         WHERE status IN ('Preparing', 'Running', 'Paused', 'Correcting')
+         LIMIT 1`,
+      );
+      if (activeGame.rows[0]) {
+        throw new ApiFault(
+          409,
+          'ACTIVE_GAME_ALREADY_EXISTS',
+          '当前已有一场正在推进的游戏。',
+        );
+      }
       await client.query(
         `INSERT INTO games (id, name, host_user_id)
          VALUES ($1, $2, $3)`,
@@ -224,13 +238,15 @@ export class GameService {
       [input.email.trim()],
     );
     const target = userResult.rows[0];
-    if (!target) throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到该用户。');
+    if (!target)
+      throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到该注册用户。');
 
     await this.database.query(
       `INSERT INTO game_members (id, game_id, user_id, role, status)
        VALUES ($1, $2, $3, $4, 'Active')
        ON CONFLICT (game_id, user_id) DO UPDATE SET
-         role = EXCLUDED.role, status = 'Active'`,
+         role = EXCLUDED.role, status = 'Active'
+       WHERE game_members.role NOT IN ('Host', 'Administrator')`,
       [randomUUID(), input.gameId, target.id, input.role],
     );
     const members = await this.listMembers(input.gameId, input.actorUserId);

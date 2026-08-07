@@ -17,7 +17,7 @@ docs/          产品、架构、规则与验收文档
 
 要求 Node.js 22+、pnpm 11，以及可选的 Docker Compose。
 
-1. 复制 `.env.example` 为 `.env`，仅在本机填写密钥。
+1. 复制 `.env.example` 为仓库根目录的 `.env`，仅在本机填写密钥；开发服务、迁移和种子命令会自动读取它。
 2. 安装依赖：`pnpm.cmd install`。
 3. 启动 PostgreSQL、Redis 和对象存储：`docker compose -f infrastructure/compose.yaml up -d database redis object-storage`。
 4. 执行迁移：`pnpm.cmd db:migrate`。
@@ -55,15 +55,14 @@ pnpm.cmd --filter @srilanka/api test:integration
 
 ## M1 开发账号与动态端口
 
-M1 不开放公网注册。首次本地启动前，通过显式环境变量创建或更新开发账号：
+首次本地启动前，在根目录 `.env` 中填写 `SEED_HOST_EMAIL`、`SEED_HOST_PASSWORD`、`SEED_HOST_NAME`、`SEED_GAME_NAME` 和 `SEED_COUNTRY_NAMES`，然后创建或更新主持人账号及初始游戏：
 
 ```powershell
-$env:SEED_HOST_EMAIL = 'host@example.local'
-$env:SEED_HOST_PASSWORD = 'replace-with-at-least-8-characters'
-$env:SEED_HOST_NAME = 'Local Host'
 pnpm.cmd db:migrate
 pnpm.cmd --filter @srilanka/api seed:dev
 ```
+
+PowerShell 中已设置的同名 `$env:变量名` 优先于 `.env`，因此仍可用它临时覆盖单项配置。
 
 若 Windows 保留了默认 API 端口，可让 API 使用可用端口，并让 Vite 代理到该地址。浏览器仍访问 `http://localhost:5173`，无需把 `VITE_API_BASE_URL` 改成跨域地址：
 
@@ -75,4 +74,4 @@ $env:VITE_API_PROXY_TARGET = 'http://127.0.0.1:6369'
 pnpm.cmd dev
 ```
 
-登录后可以创建游戏和初始国家；新游戏会自动生成主持人成员关系和第 1 年春季的准备中季度。成员管理、国家分配及跨游戏访问均由 API 强制鉴权。
+系统同时最多保留一场正在推进的游戏，普通网页不提供创建入口。首次运行 `seed:dev` 会自动建立初始游戏、国家、主持人成员关系和第 1 年春季的准备中季度。其他用户可以在登录页自助注册，再由主持人按注册邮箱将其添加为玩家或观察者；成员管理、国家分配及跨游戏访问均由 API 强制鉴权。

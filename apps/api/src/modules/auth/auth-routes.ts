@@ -15,6 +15,23 @@ const loginSchema = z.object({
   email: z.string().email().max(320),
   password: z.string().min(8).max(256),
 });
+const registrationSchema = loginSchema.extend({
+  displayName: z.string().trim().min(1).max(120),
+});
+
+function setSessionCookie(
+  reply: FastifyReply,
+  result: { token: string; expiresAt: Date },
+  secureCookies: boolean,
+): void {
+  void reply.setCookie(SESSION_COOKIE, result.token, {
+    path: '/api/v1',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: secureCookies,
+    expires: result.expiresAt,
+  });
+}
 
 export function sendApiError(
   request: FastifyRequest,
@@ -48,6 +65,36 @@ export async function registerAuthRoutes(
   auth: AuthService,
   secureCookies: boolean,
 ): Promise<void> {
+  app.post('/api/v1/auth/register', async (request, reply) => {
+    const parsed = registrationSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return sendApiError(
+        request,
+        reply,
+        400,
+        'VALIDATION_FAILED',
+        '邮箱、显示名称或密码格式不正确。',
+      );
+    }
+
+    const result = await auth.register(parsed.data);
+    if (!result) {
+      return sendApiError(
+        request,
+        reply,
+        409,
+        'EMAIL_ALREADY_REGISTERED',
+        '该邮箱已经注册。',
+      );
+    }
+    setSessionCookie(reply, result, secureCookies);
+    const body: ApiResponse<CurrentUser> = {
+      data: result.user,
+      meta: { requestId: request.id },
+    };
+    return reply.status(201).send(body);
+  });
+
   app.post('/api/v1/auth/login', async (request, reply) => {
     const parsed = loginSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -71,13 +118,7 @@ export async function registerAuthRoutes(
       );
     }
 
-    void reply.setCookie(SESSION_COOKIE, result.token, {
-      path: '/api/v1',
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: secureCookies,
-      expires: result.expiresAt,
-    });
+    setSessionCookie(reply, result, secureCookies);
     const body: ApiResponse<CurrentUser> = {
       data: result.user,
       meta: { requestId: request.id },
