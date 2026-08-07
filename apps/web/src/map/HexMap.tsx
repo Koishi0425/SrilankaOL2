@@ -29,6 +29,15 @@ import {
 
 const HEX_SIZE = 27;
 
+const discoveryStateNames: Record<MapTileSummary['discoveryState'], string> = {
+  Unknown: '未知',
+  Rumored: '传闻',
+  Discovered: '已发现',
+  Mapped: '已测绘',
+  Observed: '近期观察',
+  Outdated: '信息过时',
+};
+
 function drawHex(
   context: CanvasRenderingContext2D,
   x: number,
@@ -395,7 +404,7 @@ export function HexMap({
                 <dd>{selected.movementCost ?? '未知'}</dd>
                 <dt>地图认知</dt>
                 <dd>
-                  {selected.discoveryState}
+                  {discoveryStateNames[selected.discoveryState]}
                   {selected.observedWorldVersion !== null &&
                     ` · 世界版本 ${selected.observedWorldVersion}`}
                 </dd>
