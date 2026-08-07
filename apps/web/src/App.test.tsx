@@ -139,6 +139,7 @@ describe('App', () => {
       screen.queryByRole('button', { name: '创建游戏' }),
     ).not.toBeInTheDocument();
     expect(await screen.findByText('成员管理')).toBeInTheDocument();
+    expect(screen.getByRole('main')).toHaveClass('app-shell--wide');
     fireEvent.change(screen.getByLabelText('玩家视角预览'), {
       target: { value: '00000000-0000-4000-8000-000000000006' },
     });

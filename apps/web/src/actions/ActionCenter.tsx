@@ -25,6 +25,7 @@ import {
   fetchActionVersions,
   hostDecideAction,
   hostInterpretAction,
+  saveActionVersion,
   submitAction,
   transitionQuarter,
   updateAction,
@@ -70,6 +71,15 @@ export function applyMapSeedToDraft(
   };
 }
 
+export function editableFieldsFromVersion(version: ActionVersion) {
+  return {
+    title: version.title,
+    text: version.originalText,
+    category: version.category,
+    secrecy: version.secrecy,
+  };
+}
+
 const statusNames: Record<ActionSummary['status'], string> = {
   Draft: '草稿',
   Submitted: '已提交',
@@ -99,6 +109,12 @@ const categories: Array<[ActionCategory, string]> = [
   ['Custom', '自定义'],
 ];
 
+const secrecyNames: Record<ActionSecrecy, string> = {
+  OwnerOnly: '仅本国与主持人',
+  Participants: '相关参与方',
+  Public: '公开',
+};
+
 export function ActionCenter({
   game,
   seed,
@@ -125,6 +141,7 @@ export function ActionCenter({
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState('');
   const [saving, setSaving] = useState(false);
+  const [savingVersion, setSavingVersion] = useState(false);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [reviewText, setReviewText] = useState('');
   const [reason, setReason] = useState('');
@@ -193,6 +210,7 @@ export function ActionCenter({
     setRefs(details.refs.map(({ id: _id, ...ref }) => ref));
     setDirty(false);
     setSaving(false);
+    setSavingVersion(false);
     setSaveState('');
     setConfirmSubmit(false);
   }
@@ -233,7 +251,7 @@ export function ActionCenter({
         .then((details) => {
           setSelected(details);
           setSaving(false);
-          setSaveState(`已保存 · 版本 ${details.version}`);
+          setSaveState(`恢复草稿已自动保存 · 修订 ${details.version}`);
           void load();
         })
         .catch((cause: unknown) => {
@@ -275,7 +293,7 @@ export function ActionCenter({
       });
       edit(details);
       setVersions(await fetchActionVersions(game.id, details.id));
-      setSaveState('草稿已创建并保存。');
+      setSaveState('草稿已创建，并生成了初始手动版本。');
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '创建草稿失败');
@@ -315,6 +333,43 @@ export function ActionCenter({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '整理稿保存失败');
     }
+  }
+
+  async function confirmVersion() {
+    if (!selected || dirty || saving) return;
+    setSavingVersion(true);
+    try {
+      const savedVersions = await saveActionVersion(
+        game.id,
+        selected.id,
+        selected.version,
+      );
+      setVersions(savedVersions);
+      setSaveState(`已手动保存为版本 ${savedVersions.length}。`);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '手动保存版本失败');
+    } finally {
+      setSavingVersion(false);
+    }
+  }
+
+  function restoreVersion(version: ActionVersion) {
+    if (
+      host ||
+      !selected ||
+      !['Draft', 'NeedPlayerInput'].includes(selected.status) ||
+      version.version === selected.version
+    )
+      return;
+    const fields = editableFieldsFromVersion(version);
+    setTitle(fields.title);
+    setText(fields.text);
+    setCategory(fields.category);
+    setSecrecy(fields.secrecy);
+    setDirty(true);
+    setConfirmSubmit(false);
+    setSaveState(`已载入版本 ${version.version}，等待保存为新版本…`);
   }
 
   async function changeQuarter(
@@ -517,9 +572,28 @@ export function ActionCenter({
                 </button>
               )}
               {selected && (
-                <p className="muted">
-                  {saveState || `当前版本 ${selected.version}`}
-                </p>
+                <div className="draft-save-status">
+                  <div>
+                    <p className="muted">
+                      {saveState || `恢复草稿修订 ${selected.version}`}
+                    </p>
+                    <small>
+                      自动保存仅用于恢复进度；需要回退或对比时，请手动保存版本。
+                    </small>
+                  </div>
+                  <button
+                    className="button"
+                    type="button"
+                    disabled={dirty || saving || savingVersion}
+                    onClick={() => void confirmVersion()}
+                  >
+                    {savingVersion
+                      ? '正在保存版本…'
+                      : dirty || saving
+                        ? '等待自动保存'
+                        : '手动保存版本'}
+                  </button>
+                </div>
               )}
             </form>
           )}
@@ -630,14 +704,65 @@ export function ActionCenter({
                   </div>
                 </div>
               )}
-              <details>
-                <summary>版本与状态历史</summary>
-                <p>草稿版本：{versions.length || selected.version}</p>
-                {selected.history.map((entry) => (
-                  <p key={entry.createdAt}>
-                    {statusNames[entry.toStatus]} · {entry.reason || '状态建立'}
+              <details className="version-history">
+                <summary>手动版本（{versions.length}）与状态历史</summary>
+                <div className="version-history__section">
+                  <h5>草稿版本</h5>
+                  <p className="muted">
+                    手动版本保存标题、正文、类别和保密级别；自动保存只维护恢复草稿，地图关联沿用当前设置。
                   </p>
-                ))}
+                  <div className="version-list">
+                    {versions.map((version, index) => (
+                      <details className="version-entry" key={version.version}>
+                        <summary>
+                          <strong>版本 {versions.length - index}</strong>
+                          <time dateTime={version.createdAt}>
+                            {new Date(version.createdAt).toLocaleString(
+                              'zh-CN',
+                            )}
+                          </time>
+                        </summary>
+                        <div className="version-entry__content">
+                          <h6>{version.title}</h6>
+                          <p className="version-entry__meta">
+                            {categories.find(
+                              ([category]) => category === version.category,
+                            )?.[1] ?? version.category}
+                            {' · '}
+                            {secrecyNames[version.secrecy]}
+                          </p>
+                          <pre className="action-original">
+                            {version.originalText || '（此版本正文为空）'}
+                          </pre>
+                          {editable && version.version !== selected.version && (
+                            <button
+                              className="button"
+                              type="button"
+                              onClick={() => restoreVersion(version)}
+                            >
+                              载入版本 {versions.length - index} 继续编辑
+                            </button>
+                          )}
+                          {version.version === selected.version && (
+                            <span className="tag">当前版本</span>
+                          )}
+                        </div>
+                      </details>
+                    ))}
+                    {versions.length === 0 && (
+                      <p className="muted">尚未手动保存版本。</p>
+                    )}
+                  </div>
+                </div>
+                <div className="version-history__section">
+                  <h5>状态历史</h5>
+                  {selected.history.map((entry) => (
+                    <p key={entry.createdAt}>
+                      {statusNames[entry.toStatus]} ·{' '}
+                      {entry.reason || '状态建立'}
+                    </p>
+                  ))}
+                </div>
               </details>
             </div>
           )}

@@ -43,6 +43,9 @@ const updateSchema = createSchema.omit({ quarterId: true }).extend({
   expectedVersion: z.number().int().positive(),
   refs: z.array(refSchema).max(30).optional(),
 });
+const versionSaveSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+});
 const idempotencySchema = z.object({ idempotencyKey: z.string().uuid() });
 const textSchema = z.object({ text: z.string().trim().min(1).max(20_000) });
 const reasonSchema = z.object({ reason: z.string().trim().min(1).max(4000) });
@@ -126,6 +129,27 @@ export async function registerActionRoutes(
         envelope(
           request,
           await actions.versions(params.gameId, user.id, params.actionId),
+        ),
+      );
+    },
+  );
+
+  app.post(
+    '/api/v1/games/:gameId/actions/:actionId/versions',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      const params = parse(request, reply, actionParams, request.params);
+      const body = parse(request, reply, versionSaveSchema, request.body);
+      if (!user || !params || !body) return reply;
+      return reply.status(201).send(
+        envelope(
+          request,
+          await actions.saveVersion({
+            gameId: params.gameId,
+            actionId: params.actionId,
+            userId: user.id,
+            expectedVersion: body.expectedVersion,
+          }),
         ),
       );
     },

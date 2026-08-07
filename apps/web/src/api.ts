@@ -352,6 +352,22 @@ export async function fetchActionVersions(gameId: string, actionId: string) {
   ).data;
 }
 
+export async function saveActionVersion(
+  gameId: string,
+  actionId: string,
+  expectedVersion: number,
+) {
+  return (
+    await apiRequest<ActionVersion[]>(
+      `/games/${gameId}/actions/${actionId}/versions`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ expectedVersion }),
+      },
+    )
+  ).data;
+}
+
 export async function hostInterpretAction(
   gameId: string,
   actionId: string,

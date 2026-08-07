@@ -173,6 +173,31 @@ describe('M4 actions and communications', () => {
     expect(saved.json().data.version).toBe(2);
     expect(saved.json().data.refs[0].label).toBe('Road tile · coordinates 0,0');
 
+    const versionsAfterAutosave = await app.inject({
+      method: 'GET',
+      url: `/api/v1/games/${game.id}/actions/${actionId}/versions`,
+      headers: { cookie: aCookie },
+    });
+    expect(versionsAfterAutosave.statusCode).toBe(200);
+    expect(
+      versionsAfterAutosave
+        .json()
+        .data.map(({ version }: { version: number }) => version),
+    ).toEqual([1]);
+
+    const manuallySaved = await app.inject({
+      method: 'POST',
+      url: `/api/v1/games/${game.id}/actions/${actionId}/versions`,
+      headers: { cookie: aCookie },
+      payload: { expectedVersion: 2 },
+    });
+    expect(manuallySaved.statusCode).toBe(201);
+    expect(
+      manuallySaved
+        .json()
+        .data.map(({ version }: { version: number }) => version),
+    ).toEqual([2, 1]);
+
     const stale = await app.inject({
       method: 'PATCH',
       url: `/api/v1/games/${game.id}/actions/${actionId}`,

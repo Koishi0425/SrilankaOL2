@@ -222,8 +222,8 @@ export class ActionService {
     await client.query(
       `INSERT INTO action_versions (
          id, game_id, action_id, version, title, original_text,
-         category, secrecy, edited_by_user_id
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+         category, secrecy, edited_by_user_id, is_manual
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE)`,
       [
         randomUUID(),
         gameId,
@@ -427,7 +427,9 @@ export class ActionService {
       created_at: Date;
     }>(
       `SELECT version, title, original_text, category, secrecy, created_at
-       FROM action_versions WHERE game_id = $1 AND action_id = $2 ORDER BY version DESC`,
+       FROM action_versions
+       WHERE game_id = $1 AND action_id = $2 AND is_manual = TRUE
+       ORDER BY version DESC`,
       [gameId, actionId],
     );
     return result.rows.map((row) => ({
@@ -500,14 +502,6 @@ export class ActionService {
           input.actionId,
         ],
       );
-      await this.insertVersion(
-        client,
-        input.gameId,
-        input.actionId,
-        nextVersion,
-        input,
-        input.userId,
-      );
       if (input.refs) {
         await client.query(
           'DELETE FROM action_object_refs WHERE game_id = $1 AND action_id = $2',
@@ -538,6 +532,72 @@ export class ActionService {
       client.release();
     }
     return this.get(input.gameId, input.userId, input.actionId);
+  }
+
+  async saveVersion(input: {
+    gameId: string;
+    userId: string;
+    actionId: string;
+    expectedVersion: number;
+  }): Promise<ActionVersion[]> {
+    const client = await this.database.connect();
+    try {
+      await client.query('BEGIN');
+      const member = await this.member(input.gameId, input.userId, client);
+      this.requirePlayer(member);
+      const locked = await client.query<ActionRow>(
+        `${actionSelect} WHERE a.game_id = $1 AND a.id = $2 FOR UPDATE`,
+        [input.gameId, input.actionId],
+      );
+      const action = locked.rows[0];
+      if (!action || action.created_by_member_id !== member.id) {
+        throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到该行动。');
+      }
+      if (!['Draft', 'NeedPlayerInput'].includes(action.status)) {
+        throw new ApiFault(
+          409,
+          'ACTION_NOT_EDITABLE',
+          '当前行动状态不可保存草稿版本。',
+        );
+      }
+      await this.ensureQuarterEditable(client, input.gameId, action.quarter_id);
+      if (action.version !== input.expectedVersion) {
+        throw new ApiFault(
+          409,
+          'ACTION_VERSION_CONFLICT',
+          '草稿已在其他窗口更新。',
+          { currentVersion: action.version },
+        );
+      }
+      const promoted = await client.query(
+        `UPDATE action_versions SET is_manual = TRUE
+         WHERE game_id = $1 AND action_id = $2 AND version = $3
+         RETURNING id`,
+        [input.gameId, input.actionId, action.version],
+      );
+      if (!promoted.rows[0]) {
+        await this.insertVersion(
+          client,
+          input.gameId,
+          input.actionId,
+          action.version,
+          {
+            title: action.title,
+            originalText: action.current_text,
+            category: action.category,
+            secrecy: action.secrecy,
+          },
+          input.userId,
+        );
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return this.versions(input.gameId, input.userId, input.actionId);
   }
 
   async submit(input: {

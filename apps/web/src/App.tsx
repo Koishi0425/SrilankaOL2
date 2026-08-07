@@ -570,7 +570,7 @@ export function App() {
   }
 
   return (
-    <main>
+    <main className={session.kind === 'ready' ? 'app-shell--wide' : undefined}>
       <header className="site-header">
         <div className="brand">
           <span className="brand__mark">SL</span>

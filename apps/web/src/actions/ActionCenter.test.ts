@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyMapSeedToDraft,
+  editableFieldsFromVersion,
   mergeActionRefs,
   type ActionDraftSeed,
 } from './ActionCenter.js';
@@ -45,5 +46,23 @@ describe('map action draft helpers', () => {
     expect(result.title).toBe('关于北部平原的政策 / 行动');
     expect(result.category).toBe('Policy');
     expect(result.refs[0]?.label).toContain('坐标 4,7');
+  });
+
+  it('loads editable fields from an earlier version', () => {
+    expect(
+      editableFieldsFromVersion({
+        version: 2,
+        title: '旧版屯田政策',
+        originalText: '保留旧版正文。',
+        category: 'Policy',
+        secrecy: 'OwnerOnly',
+        createdAt: '2026-08-07T00:00:00.000Z',
+      }),
+    ).toEqual({
+      title: '旧版屯田政策',
+      text: '保留旧版正文。',
+      category: 'Policy',
+      secrecy: 'OwnerOnly',
+    });
   });
 });
