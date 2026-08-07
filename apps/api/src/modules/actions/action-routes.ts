@@ -39,8 +39,9 @@ const createSchema = z.object({
   secrecy,
   refs: z.array(refSchema).max(30).default([]),
 });
-const updateSchema = createSchema.omit({ quarterId: true, refs: true }).extend({
+const updateSchema = createSchema.omit({ quarterId: true }).extend({
   expectedVersion: z.number().int().positive(),
+  refs: z.array(refSchema).max(30).optional(),
 });
 const idempotencySchema = z.object({ idempotencyKey: z.string().uuid() });
 const textSchema = z.object({ text: z.string().trim().min(1).max(20_000) });

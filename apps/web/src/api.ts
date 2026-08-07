@@ -312,6 +312,7 @@ export async function updateAction(
     originalText: string;
     category: ActionCategory;
     secrecy: ActionSecrecy;
+    refs: Array<Omit<ActionObjectRef, 'id'>>;
   },
 ) {
   return (

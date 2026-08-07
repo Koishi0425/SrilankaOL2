@@ -6,6 +6,7 @@ import type {
   GameSummary,
   HealthResponse,
   MeData,
+  TileDetails,
 } from '@srilanka/contracts';
 
 import {
@@ -263,6 +264,27 @@ function GameWorkspace({ game }: { game: GameSummary }) {
     }
   }
 
+  function addTileToAction(tile: TileDetails) {
+    const placeName = tile.regionName ?? `地块 ${tile.q},${tile.r}`;
+    const details = [
+      `坐标 ${tile.q},${tile.r}`,
+      tile.terrainName ?? '未知地形',
+      tile.controllerCountryName
+        ? `由${tile.controllerCountryName}控制`
+        : '控制方未知',
+    ].join(' · ');
+    setActionSeed({
+      key: Date.now(),
+      title: `关于${placeName}的政策 / 行动`.slice(0, 160),
+      ref: {
+        refKind: 'Target',
+        objectType: 'Tile',
+        objectId: tile.id,
+        label: `${placeName}（${details}）`.slice(0, 160),
+      },
+    });
+  }
+
   return (
     <section className="workspace-card">
       <div className="workspace-card__heading">
@@ -285,9 +307,11 @@ function GameWorkspace({ game }: { game: GameSummary }) {
               className={workspaceTab === 'map' ? 'workspace-tabs__active' : ''}
               onClick={() => setWorkspaceTab('map')}
             >
-              世界地图
+              {game.role === 'Player' && !previewMemberId
+                ? '地图与政策'
+                : '世界地图'}
             </button>
-            {(game.role === 'Player' || canManage) && !previewMemberId && (
+            {canManage && !previewMemberId && (
               <button
                 className={
                   workspaceTab === 'actions' ? 'workspace-tabs__active' : ''
@@ -339,24 +363,33 @@ function GameWorkspace({ game }: { game: GameSummary }) {
           )}
           {workspaceTab === 'map' && (
             <>
-              <HexMap
-                game={{ ...game, currentQuarter }}
-                countries={countries}
-                previewMemberId={previewMemberId || undefined}
-                onCreateAction={(tile) => {
-                  setActionSeed({
-                    key: Date.now(),
-                    title: `关于${tile.regionName ?? `地块 ${tile.q},${tile.r}`}的行动`,
-                    ref: {
-                      refKind: 'Target',
-                      objectType: 'Tile',
-                      objectId: tile.id,
-                      label: tile.regionName ?? `${tile.q},${tile.r}`,
-                    },
-                  });
-                  setWorkspaceTab('actions');
-                }}
-              />
+              {game.role === 'Player' && !previewMemberId ? (
+                <div className="map-action-workspace">
+                  <HexMap
+                    compact
+                    game={{ ...game, currentQuarter }}
+                    countries={countries}
+                    onCreateAction={addTileToAction}
+                  />
+                  <ActionCenter
+                    game={{ ...game, currentQuarter }}
+                    seed={actionSeed}
+                    variant="map"
+                    onQuarterChange={setCurrentQuarter}
+                    onSeedConsumed={(key) =>
+                      setActionSeed((current) =>
+                        current?.key === key ? undefined : current,
+                      )
+                    }
+                  />
+                </div>
+              ) : (
+                <HexMap
+                  game={{ ...game, currentQuarter }}
+                  countries={countries}
+                  previewMemberId={previewMemberId || undefined}
+                />
+              )}
               <div className="context-grid">
                 <div>
                   <h3>国家</h3>

@@ -68,11 +68,13 @@ export function HexMap({
   countries,
   previewMemberId,
   onCreateAction,
+  compact = false,
 }: {
   game: GameSummary;
   countries: CountrySummary[];
   previewMemberId?: string;
   onCreateAction?: (tile: TileDetails) => void;
+  compact?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
@@ -297,7 +299,7 @@ export function HexMap({
   }
 
   return (
-    <section className="map-shell">
+    <section className={`map-shell${compact ? ' map-shell--compact' : ''}`}>
       <div className="map-toolbar">
         <div>
           <p className="eyebrow">WORLD MAP</p>
@@ -445,7 +447,7 @@ export function HexMap({
                   type="button"
                   onClick={() => onCreateAction(selected)}
                 >
-                  基于此地块创建行动
+                  将此地块加入政策 / 行动
                 </button>
               )}
               {canEdit && (

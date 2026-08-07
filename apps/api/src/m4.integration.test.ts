@@ -159,10 +159,19 @@ describe('M4 actions and communications', () => {
         originalText: 'First immutable player text',
         category: 'Military',
         secrecy: 'OwnerOnly',
+        refs: [
+          {
+            refKind: 'Target',
+            objectType: 'Tile',
+            objectId: tile.rows[0]!.id,
+            label: 'Road tile · coordinates 0,0',
+          },
+        ],
       },
     });
     expect(saved.statusCode).toBe(200);
     expect(saved.json().data.version).toBe(2);
+    expect(saved.json().data.refs[0].label).toBe('Road tile · coordinates 0,0');
 
     const stale = await app.inject({
       method: 'PATCH',
@@ -321,5 +330,33 @@ describe('M4 actions and communications', () => {
     });
     expect(lockedUpdate.statusCode).toBe(409);
     expect(lockedUpdate.json().error.code).toBe('ACTION_SUBMISSION_LOCKED');
+
+    await games.transitionCurrentQuarter({
+      gameId: game.id,
+      userId: host.id,
+      state: 'HostReview',
+    });
+    const reopened = await games.transitionCurrentQuarter({
+      gameId: game.id,
+      userId: host.id,
+      state: 'ActionSubmission',
+    });
+    expect(reopened.state).toBe('ActionSubmission');
+    const reopenedAction = await actions.get(game.id, playerA.id, actionId);
+    expect(reopenedAction.status).toBe('Submitted');
+
+    const reopenedUpdate = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/games/${game.id}/actions/${secondDraft.json().data.id}`,
+      headers: { cookie: aCookie },
+      payload: {
+        expectedVersion: 1,
+        title: 'Editable after reopening',
+        originalText: 'The host reopened policy submission',
+        category: 'Policy',
+        secrecy: 'OwnerOnly',
+      },
+    });
+    expect(reopenedUpdate.statusCode).toBe(200);
   });
 });

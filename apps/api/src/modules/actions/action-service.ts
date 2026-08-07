@@ -449,12 +449,13 @@ export class ActionService {
     originalText: string;
     category: ActionCategory;
     secrecy: ActionSecrecy;
+    refs?: Array<Omit<ActionObjectRef, 'id'>>;
   }): Promise<ActionDetails> {
     const client = await this.database.connect();
     try {
       await client.query('BEGIN');
       const member = await this.member(input.gameId, input.userId, client);
-      this.requirePlayer(member);
+      const countryId = this.requirePlayer(member);
       const locked = await client.query<ActionRow>(
         `${actionSelect} WHERE a.game_id = $1 AND a.id = $2 FOR UPDATE`,
         [input.gameId, input.actionId],
@@ -481,6 +482,9 @@ export class ActionService {
           },
         );
       }
+      if (input.refs) {
+        await this.validateRefs(client, input.gameId, countryId, input.refs);
+      }
       const nextVersion = action.version + 1;
       await client.query(
         `UPDATE actions SET title = $1, current_text = $2, category = $3,
@@ -504,6 +508,28 @@ export class ActionService {
         input,
         input.userId,
       );
+      if (input.refs) {
+        await client.query(
+          'DELETE FROM action_object_refs WHERE game_id = $1 AND action_id = $2',
+          [input.gameId, input.actionId],
+        );
+        for (const ref of input.refs) {
+          await client.query(
+            `INSERT INTO action_object_refs (
+               id, game_id, action_id, ref_kind, object_type, object_id, label
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [
+              randomUUID(),
+              input.gameId,
+              input.actionId,
+              ref.refKind,
+              ref.objectType,
+              ref.objectId,
+              ref.label,
+            ],
+          );
+        }
+      }
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');

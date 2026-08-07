@@ -1,4 +1,10 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react';
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import type {
   ActionCategory,
@@ -29,6 +35,39 @@ export interface ActionDraftSeed {
   key: number;
   title: string;
   ref: Omit<ActionObjectRef, 'id'>;
+}
+
+type DraftRef = Omit<ActionObjectRef, 'id'>;
+
+export function mergeActionRefs(
+  current: DraftRef[],
+  incoming: DraftRef,
+): DraftRef[] {
+  const duplicate = current.some(
+    (ref) =>
+      ref.refKind === incoming.refKind &&
+      ref.objectType === incoming.objectType &&
+      ref.objectId === incoming.objectId,
+  );
+  return duplicate ? current : [...current, incoming];
+}
+
+export function applyMapSeedToDraft(
+  current: {
+    title: string;
+    text: string;
+    category: ActionCategory;
+    refs: DraftRef[];
+  },
+  seed: ActionDraftSeed,
+) {
+  return {
+    ...current,
+    title: current.title || seed.title,
+    category:
+      current.category === 'Custom' ? ('Policy' as const) : current.category,
+    refs: mergeActionRefs(current.refs, seed.ref),
+  };
 }
 
 const statusNames: Record<ActionSummary['status'], string> = {
@@ -64,10 +103,14 @@ export function ActionCenter({
   game,
   seed,
   onQuarterChange,
+  onSeedConsumed,
+  variant = 'standalone',
 }: {
   game: GameSummary;
   seed?: ActionDraftSeed;
   onQuarterChange?: (quarter: QuarterSummary) => void;
+  onSeedConsumed?: (key: number) => void;
+  variant?: 'standalone' | 'map';
 }) {
   const host = game.role === 'Host' || game.role === 'Administrator';
   const [quarter, setQuarter] = useState<QuarterSummary>(game.currentQuarter);
@@ -78,7 +121,7 @@ export function ActionCenter({
   const [text, setText] = useState('');
   const [category, setCategory] = useState<ActionCategory>('Custom');
   const [secrecy, setSecrecy] = useState<ActionSecrecy>('OwnerOnly');
-  const [refs, setRefs] = useState<Array<Omit<ActionObjectRef, 'id'>>>([]);
+  const [refs, setRefs] = useState<DraftRef[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState('');
   const [saving, setSaving] = useState(false);
@@ -86,6 +129,7 @@ export function ActionCenter({
   const [reviewText, setReviewText] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
+  const handledSeedKey = useRef<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -98,17 +142,47 @@ export function ActionCenter({
   useEffect(() => void load(), [load]);
 
   useEffect(() => {
-    if (!seed || host) return;
-    setSelected(null);
-    setTitle(seed.title);
-    setText('');
-    setCategory('Custom');
-    setSecrecy('OwnerOnly');
-    setRefs([seed.ref]);
-    setDirty(false);
-    setSaving(false);
-    setSaveState('来自地图的对象引用已添加，请创建草稿。');
-  }, [host, seed]);
+    if (!seed || host || handledSeedKey.current === seed.key) return;
+    handledSeedKey.current = seed.key;
+
+    const canAppendToSelected =
+      selected && ['Draft', 'NeedPlayerInput'].includes(selected.status);
+    if (selected && !canAppendToSelected) {
+      setSelected(null);
+      setTitle(seed.title);
+      setText('');
+      setCategory('Policy');
+      setSecrecy('OwnerOnly');
+      setRefs([seed.ref]);
+      setDirty(false);
+      setSaving(false);
+      setSaveState('已基于地图目标开始一份新草稿。');
+      setConfirmSubmit(false);
+      onSeedConsumed?.(seed.key);
+      return;
+    }
+
+    const seededDraft = applyMapSeedToDraft(
+      { title, text, category, refs },
+      seed,
+    );
+    const added = seededDraft.refs !== refs;
+    setRefs(seededDraft.refs);
+    if (!selected) {
+      setTitle(seededDraft.title);
+      setCategory(seededDraft.category);
+    } else if (added) {
+      setDirty(true);
+    }
+    setSaveState(
+      added
+        ? selected
+          ? '已加入地图目标，等待自动保存…'
+          : '已加入地图目标，请继续编写草稿。'
+        : '该地图目标已经在当前行动中。',
+    );
+    onSeedConsumed?.(seed.key);
+  }, [category, host, onSeedConsumed, refs, seed, selected, text, title]);
 
   function edit(details: ActionDetails) {
     setSelected(details);
@@ -154,6 +228,7 @@ export function ActionCenter({
         originalText: text,
         category,
         secrecy,
+        refs,
       })
         .then((details) => {
           setSelected(details);
@@ -174,7 +249,18 @@ export function ActionCenter({
         });
     }, 800);
     return () => window.clearTimeout(timeout);
-  }, [category, dirty, game.id, host, load, secrecy, selected, text, title]);
+  }, [
+    category,
+    dirty,
+    game.id,
+    host,
+    load,
+    refs,
+    secrecy,
+    selected,
+    text,
+    title,
+  ]);
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -248,22 +334,28 @@ export function ActionCenter({
     !host && selected && ['Draft', 'NeedPlayerInput'].includes(selected.status);
 
   return (
-    <section className="work-center">
+    <section
+      className={`work-center${variant === 'map' ? ' work-center--map' : ''}`}
+    >
       <header className="center-heading">
         <div>
           <p className="eyebrow">ACTION CENTER</p>
-          <h3>{host ? '主持人行动审核' : '行动中心'}</h3>
+          <h3>{host ? '主持人行动审核' : '政策与行动'}</h3>
         </div>
         <span className="tag">季度状态：{quarter.state}</span>
       </header>
       {host && (
         <div className="quarter-actions">
-          {['Preparing', 'EventResponse', 'Locked'].includes(quarter.state) && (
+          {['Preparing', 'EventResponse', 'Locked', 'HostReview'].includes(
+            quarter.state,
+          ) && (
             <button
               className="button"
               onClick={() => void changeQuarter('ActionSubmission')}
             >
-              开放行动提交
+              {['Locked', 'HostReview'].includes(quarter.state)
+                ? '重新开放政策提交'
+                : '开放政策提交'}
             </button>
           )}
           {quarter.state === 'ActionSubmission' && (
@@ -295,10 +387,15 @@ export function ActionCenter({
                 setSelected(null);
                 setTitle('');
                 setText('');
+                setCategory('Policy');
+                setSecrecy('OwnerOnly');
                 setRefs([]);
+                setDirty(false);
+                setSaveState('选择地图地块可把它加入这份新草稿。');
+                setConfirmSubmit(false);
               }}
             >
-              新建行动
+              新建政策 / 行动
             </button>
           )}
           {items.map((item) => (
@@ -366,19 +463,43 @@ export function ActionCenter({
                 </label>
               </div>
               {refs.length > 0 && (
-                <div className="reference-list">
+                <div className="reference-list" aria-label="行动关联目标">
                   {refs.map((ref) => (
                     <span
                       className="tag"
                       key={`${ref.refKind}-${ref.objectId}`}
                     >
                       {ref.objectType} · {ref.label || ref.objectId}
+                      <button
+                        type="button"
+                        aria-label={`移除目标 ${ref.label || ref.objectId}`}
+                        onClick={() => {
+                          setRefs((current) =>
+                            current.filter(
+                              (item) =>
+                                !(
+                                  item.refKind === ref.refKind &&
+                                  item.objectType === ref.objectType &&
+                                  item.objectId === ref.objectId
+                                ),
+                            ),
+                          );
+                          if (selected) setDirty(true);
+                          setSaveState(
+                            selected
+                              ? '已移除地图目标，等待自动保存…'
+                              : '已从新草稿移除地图目标。',
+                          );
+                        }}
+                      >
+                        ×
+                      </button>
                     </span>
                   ))}
                 </div>
               )}
               <label>
-                原始行动内容
+                政策 / 行动内容
                 <textarea
                   rows={12}
                   maxLength={20_000}

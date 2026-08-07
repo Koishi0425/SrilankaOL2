@@ -208,6 +208,7 @@ export class GameService {
         EventResponse: ['ActionSubmission'],
         ActionSubmission: ['Locked'],
         Locked: ['HostReview', 'ActionSubmission'],
+        HostReview: ['ActionSubmission'],
       };
       if (!allowed[quarter.state]?.includes(input.state)) {
         throw new ApiFault(
@@ -254,6 +255,23 @@ export class GameService {
         );
       }
       if (input.state === 'ActionSubmission') {
+        if (quarter.state === 'HostReview') {
+          await client.query(
+            `INSERT INTO action_status_history (
+               id, game_id, action_id, from_status, to_status, actor_user_id, reason
+             )
+             SELECT gen_random_uuid(), game_id, id, status, 'Submitted', $2,
+                    '主持人重新开放季度行动提交'
+             FROM actions
+             WHERE game_id = $1 AND quarter_id = $3 AND status = 'HostReview'`,
+            [input.gameId, input.userId, quarter.id],
+          );
+          await client.query(
+            `UPDATE actions SET status = 'Submitted', updated_at = NOW()
+             WHERE game_id = $1 AND quarter_id = $2 AND status = 'HostReview'`,
+            [input.gameId, quarter.id],
+          );
+        }
         await client.query(
           `UPDATE games SET status = 'Running', started_at = COALESCE(started_at, NOW())
            WHERE id = $1 AND status = 'Preparing'`,
