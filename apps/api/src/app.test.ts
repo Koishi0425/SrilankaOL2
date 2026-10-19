@@ -9,6 +9,32 @@ afterEach(async () => {
 });
 
 describe('GET /api/v1/health', () => {
+  it('returns client errors for malformed JSON or unsupported content types without echoing submitted secrets', async () => {
+    const app = await buildApp({
+      logLevel: 'silent',
+      health: { checkDatabase: async () => {}, checkRedis: async () => {} },
+    });
+    apps.push(app);
+    app.post('/api/v1/check', async (request) => request.body);
+    const malformed = await app.inject({
+      method: 'POST',
+      url: '/api/v1/check',
+      headers: { 'content-type': 'application/json' },
+      payload: '{"password":"secret-value"',
+    });
+    expect(malformed.statusCode).toBe(400);
+    expect(malformed.json().error.code).toBe('INVALID_REQUEST_BODY');
+    expect(malformed.body).not.toContain('secret-value');
+    const unsupported = await app.inject({
+      method: 'POST',
+      url: '/api/v1/check',
+      headers: { 'content-type': 'application/x-unknown' },
+      payload: 'secret-value',
+    });
+    expect(unsupported.statusCode).toBe(415);
+    expect(unsupported.json().error.code).toBe('UNSUPPORTED_MEDIA_TYPE');
+    expect(unsupported.body).not.toContain('secret-value');
+  });
   it('returns the documented envelope and preserves safe request IDs', async () => {
     const app = await buildApp({
       health: {

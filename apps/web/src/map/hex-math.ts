@@ -4,6 +4,102 @@ export interface ViewTransform {
   scale: number;
 }
 
+/** Keep the world point under the cursor fixed, including at zoom limits. */
+export function zoomAt(
+  view: ViewTransform,
+  point: { x: number; y: number },
+  factor: number,
+  min: number,
+  max: number,
+): ViewTransform {
+  const scale = Math.min(max, Math.max(min, view.scale * factor));
+  const ratio = scale / view.scale;
+  return {
+    scale,
+    offsetX: point.x - (point.x - view.offsetX) * ratio,
+    offsetY: point.y - (point.y - view.offsetY) * ratio,
+  };
+}
+
+export function fitMap(
+  columns: number,
+  rows: number,
+  width: number,
+  height: number,
+  size: number,
+  maxZoom: number,
+): ViewTransform {
+  const halfWidth = (Math.sqrt(3) * size) / 2;
+  const minX = -halfWidth;
+  const maxX =
+    (columns - 1) * halfWidth * 2 + (rows > 1 ? halfWidth : 0) + halfWidth;
+  const minY = -size;
+  const maxY = (rows - 1) * size * 1.5 + size;
+  const scale = Math.max(
+    0.01,
+    Math.min(
+      maxZoom,
+      (width - 64) / (maxX - minX),
+      (height - 64) / (maxY - minY),
+    ),
+  );
+  return {
+    scale,
+    offsetX: width / 2 - ((minX + maxX) * scale) / 2,
+    offsetY: height / 2 - ((minY + maxY) * scale) / 2,
+  };
+}
+
+export function fitTiles(
+  tiles: Array<{ q: number; r: number }>,
+  width: number,
+  height: number,
+  size: number,
+  maxZoom: number,
+): ViewTransform {
+  const points = tiles.map((tile) => axialToPixel(tile.q, tile.r, size));
+  const xs = points.map((p) => p.x),
+    ys = points.map((p) => p.y);
+  const minX = Math.min(...xs) - (Math.sqrt(3) * size) / 2;
+  const maxX = Math.max(...xs) + (Math.sqrt(3) * size) / 2;
+  const minY = Math.min(...ys) - size,
+    maxY = Math.max(...ys) + size;
+  const scale = Math.max(
+    0.01,
+    Math.min(
+      maxZoom,
+      (width - 80) / (maxX - minX),
+      (height - 80) / (maxY - minY),
+    ),
+  );
+  return {
+    scale,
+    offsetX: width / 2 - ((minX + maxX) * scale) / 2,
+    offsetY: height / 2 - ((minY + maxY) * scale) / 2,
+  };
+}
+
+/** The server caps each viewport request at 2,500 coordinates. */
+export function splitViewport(bounds: {
+  minQ: number;
+  maxQ: number;
+  minR: number;
+  maxR: number;
+}) {
+  const parts: (typeof bounds)[] = [];
+  for (let q = bounds.minQ; q <= bounds.maxQ; q += 50) {
+    for (let r = bounds.minR; r <= bounds.maxR; r += 50) {
+      parts.push({
+        minQ: q,
+        maxQ: Math.min(q + 49, bounds.maxQ),
+        minR: r,
+        maxR: Math.min(r + 49, bounds.maxR),
+      });
+    }
+  }
+  return parts;
+}
+
 export function axialToPixel(q: number, r: number, size: number) {
   // Persisted q/r coordinates use an odd-row offset grid so rectangular
   // coordinate ranges also have a rectangular map outline.

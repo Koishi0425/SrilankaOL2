@@ -18,7 +18,11 @@
     "pretest": "pnpm build:packages",
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
-    "db:migrate": "pnpm --filter @srilanka/database migrate"
+    "db:migrate": "pnpm --filter @srilanka/database migrate",
+    "db:backup": "pnpm --filter @srilanka/database backup create",
+    "db:backup:verify": "pnpm --filter @srilanka/database backup verify",
+    "db:backup:watch": "pnpm --filter @srilanka/database backup watch",
+    "db:restore": "pnpm --filter @srilanka/database backup restore"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -14,3 +14,6 @@ coverage
 playwright-report
 test-results
 docs
+backups
+**/backups
+*.pdf

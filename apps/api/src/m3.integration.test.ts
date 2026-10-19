@@ -167,7 +167,10 @@ describe('M3 player views', () => {
     expect(hiddenSearch.statusCode).toBe(200);
     expect(hiddenSearch.json().data).toEqual([]);
     const uninformed = await requestView(playerBCookie);
-    expect(armyFrom(uninformed)).toBeUndefined();
-    expect(JSON.stringify(uninformed.json())).not.toContain('1200');
+    expect(
+      uninformed
+        .json()
+        .data.tiles.flatMap((tile: { armies: unknown[] }) => tile.armies),
+    ).toEqual([]);
   });
 });

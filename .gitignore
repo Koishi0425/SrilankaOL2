@@ -12,3 +12,17 @@ coverage/
 .vite/
 playwright-report/
 test-results/
+backups/
+
+# Local personal documents are not project source.
+/*.pdf
+
+# Local credentials and database exports.
+*.pem
+*.key
+*.p12
+*.pfx
+*.dump
+*.db
+*.sqlite
+*.sqlite3

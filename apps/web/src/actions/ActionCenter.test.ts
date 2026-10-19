@@ -36,6 +36,32 @@ describe('map action draft helpers', () => {
 
     expect(mergeActionRefs(current, firstTarget)).toBe(current);
   });
+  it('takes the shortcut category for an empty draft and preserves a policy already being written', () => {
+    const seed: ActionDraftSeed = {
+      key: 3,
+      title: '建设北省',
+      category: 'Construction',
+      ref: { ...firstTarget, objectType: 'Province' },
+    };
+    expect(
+      applyMapSeedToDraft(
+        { title: '', text: '', category: 'Policy', refs: [] },
+        seed,
+      ).category,
+    ).toBe('Construction');
+    const current = {
+      title: '军事补给',
+      text: '保留玩家正文',
+      category: 'Military' as const,
+      refs: [],
+    };
+    expect(applyMapSeedToDraft(current, seed)).toMatchObject({
+      title: '军事补给',
+      text: '保留玩家正文',
+      category: 'Military',
+      refs: [seed.ref],
+    });
+  });
 
   it('uses map context for an empty custom draft', () => {
     const result = applyMapSeedToDraft(

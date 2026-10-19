@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type {
   ActionCategory,
@@ -7,11 +7,13 @@ import type {
   ActionSecrecy,
   ActionStatus,
   ActionSummary,
+  ActionSubmission,
   ActionVersion,
 } from '@srilanka/contracts';
 import type { DatabaseClient, DatabasePool } from '@srilanka/database';
 
 import { ApiFault } from '../../errors.js';
+import { ensurePolicyConversation } from '../communications/policy-conversation.js';
 
 interface MemberContext {
   id: string;
@@ -110,18 +112,31 @@ export class ActionService {
     gameId: string,
     quarterId: string,
     submissionMustBeOpen = false,
-  ): Promise<void> {
+    requestedActionId?: string,
+  ): Promise<string> {
     const result = await client.query<{
       state: string;
       action_deadline: Date | null;
     }>(
       `SELECT state, action_deadline FROM quarters
-       WHERE game_id = $1 AND id = $2 AND is_current = TRUE`,
+       WHERE game_id = $1 AND id = $2 AND is_current = TRUE FOR SHARE`,
       [gameId, quarterId],
     );
     const quarter = result.rows[0];
     if (!quarter)
       throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到当前季度。');
+    if (
+      requestedActionId &&
+      ['ActionSubmission', 'Locked', 'HostReview'].includes(quarter.state)
+    ) {
+      const pending = await client.query(
+        `SELECT r.id FROM action_input_requests r JOIN actions a ON a.id = r.action_id AND a.game_id = r.game_id
+         WHERE r.game_id = $1 AND r.action_id = $2 AND r.status = 'Pending'
+           AND a.status = 'NeedPlayerInput' AND a.quarter_id = $3 LIMIT 1`,
+        [gameId, requestedActionId, quarterId],
+      );
+      if (pending.rows[0]) return quarter.state;
+    }
     if (
       !['Preparing', 'EventResponse', 'ActionSubmission'].includes(
         quarter.state,
@@ -146,6 +161,33 @@ export class ActionService {
         '行动提交截止时间已过。',
       );
     }
+    return quarter.state;
+  }
+
+  private async lockActionQuarter(
+    client: DatabaseClient,
+    gameId: string,
+    actionId: string,
+  ) {
+    // 回合切换会先锁回合再更新行动，编辑和审核也采用相同顺序。
+    const result = await client.query<{ state: string; is_current: boolean }>(
+      `SELECT q.state, q.is_current FROM quarters q WHERE q.game_id = $1 AND q.id = (
+         SELECT quarter_id FROM actions WHERE game_id = $1 AND id = $2
+       ) FOR SHARE`,
+      [gameId, actionId],
+    );
+    if (!result.rows[0])
+      throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到该行动。');
+    return result.rows[0];
+  }
+
+  private requireReviewOpen(quarter: { state: string; is_current: boolean }) {
+    if (
+      !quarter.is_current ||
+      !['ActionSubmission', 'Locked', 'HostReview'].includes(quarter.state)
+    ) {
+      throw new ApiFault(409, 'ACTION_REVIEW_LOCKED', '本回合审核已经结束。');
+    }
   }
 
   private async validateRefs(
@@ -161,6 +203,7 @@ export class ActionService {
       Country: 'countries',
       Character: 'characters',
       Region: 'regions',
+      Province: 'provinces',
     };
     for (const ref of refs) {
       const table = tableByType[ref.objectType];
@@ -183,12 +226,22 @@ export class ActionService {
       } else if (ref.objectType === 'Character') {
         condition += ' AND object.country_id = $3';
         values.push(countryId);
+      } else if (ref.objectType === 'Province') {
+        condition += ` AND EXISTS (
+          SELECT 1 FROM country_tile_knowledge ctk
+          WHERE ctk.game_id = $1 AND ctk.country_id = $3
+            AND ctk.discovery_state IN ('Mapped', 'Observed', 'Outdated')
+            AND ctk.snapshot->>'provinceName' = object.name
+            AND COALESCE((ctk.snapshot->>'administrationKnown')::boolean,ctk.discovery_state IN ('Observed','Outdated'))
+        )`;
+        values.push(countryId);
       } else if (ref.objectType === 'Region') {
         condition += ` AND EXISTS (
           SELECT 1 FROM hex_tiles t
           JOIN country_tile_knowledge ctk ON ctk.tile_id = t.id AND ctk.game_id = t.game_id
           WHERE t.game_id = $1 AND t.region_id = object.id AND ctk.country_id = $3
             AND ctk.discovery_state IN ('Mapped', 'Observed', 'Outdated')
+            AND COALESCE((ctk.snapshot->>'administrationKnown')::boolean,ctk.discovery_state IN ('Observed','Outdated'))
         )`;
         values.push(countryId);
       }
@@ -239,6 +292,7 @@ export class ActionService {
   }
 
   async create(input: {
+    creationId?: string;
     gameId: string;
     userId: string;
     quarterId: string;
@@ -249,18 +303,64 @@ export class ActionService {
     refs: Array<Omit<ActionObjectRef, 'id'>>;
   }): Promise<ActionDetails> {
     const client = await this.database.connect();
-    const actionId = randomUUID();
+    let actionId: string = randomUUID();
     try {
       await client.query('BEGIN');
+      await client.query(
+        'SELECT id FROM quarters WHERE game_id=$1 AND id=$2 FOR SHARE',
+        [input.gameId, input.quarterId],
+      );
       const member = await this.member(input.gameId, input.userId, client);
       const countryId = this.requirePlayer(member);
+      const fingerprint = createHash('sha256')
+        .update(
+          JSON.stringify({
+            quarterId: input.quarterId,
+            countryId,
+            title: input.title,
+            originalText: input.originalText,
+            category: input.category,
+            secrecy: input.secrecy,
+            refs: input.refs.map((ref) => ({
+              refKind: ref.refKind,
+              objectType: ref.objectType,
+              objectId: ref.objectId,
+              label: ref.label,
+            })),
+          }),
+        )
+        .digest('hex');
+      if (input.creationId) {
+        await client.query(
+          'SELECT pg_advisory_xact_lock(1936445703,hashtext($1))',
+          [`${input.gameId}:${member.id}:${input.creationId}`],
+        );
+        const replay = await client.query<{
+          id: string;
+          creation_fingerprint: string;
+        }>(
+          'SELECT id,creation_fingerprint FROM actions WHERE game_id=$1 AND created_by_member_id=$2 AND creation_id=$3',
+          [input.gameId, member.id, input.creationId],
+        );
+        if (replay.rows[0]) {
+          if (replay.rows[0].creation_fingerprint !== fingerprint)
+            throw new ApiFault(
+              409,
+              'ACTION_CREATION_CONFLICT',
+              '上次创建已保存，当前内容与当时不同。请先保留本页文字，再从行动列表打开原草稿继续修改。',
+            );
+          actionId = replay.rows[0].id;
+          await client.query('COMMIT');
+          return this.get(input.gameId, input.userId, actionId);
+        }
+      }
       await this.ensureQuarterEditable(client, input.gameId, input.quarterId);
       await this.validateRefs(client, input.gameId, countryId, input.refs);
       await client.query(
         `INSERT INTO actions (
            id, game_id, quarter_id, country_id, created_by_member_id,
-           title, category, current_text, secrecy
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+           title, category, current_text, secrecy,creation_id,creation_fingerprint
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [
           actionId,
           input.gameId,
@@ -271,6 +371,8 @@ export class ActionService {
           input.category,
           input.originalText,
           input.secrecy,
+          input.creationId ?? null,
+          input.creationId ? fingerprint : null,
         ],
       );
       await this.insertVersion(
@@ -325,11 +427,14 @@ export class ActionService {
        WHERE a.game_id = $1
          AND ($2::boolean OR a.country_id = $3)
          AND (NOT $4::boolean OR a.status <> 'Draft')
+         AND (NOT $4::boolean OR EXISTS (
+           SELECT 1 FROM quarters q WHERE q.game_id = a.game_id AND q.id = a.quarter_id AND q.is_current
+         ))
        ORDER BY a.updated_at DESC`,
       [
         gameId,
         member.role === 'Host' || member.role === 'Administrator',
-        member.countryId,
+        member.role === 'Player' ? member.countryId : null,
         hostQueue,
       ],
     );
@@ -350,46 +455,62 @@ export class ActionService {
         gameId,
         actionId,
         member.role === 'Host' || member.role === 'Administrator',
-        member.countryId,
+        member.role === 'Player' ? member.countryId : null,
       ],
     );
     const row = result.rows[0];
     if (!row) throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到该行动。');
-    const [refs, interpretation, request, history] = await Promise.all([
-      this.database.query<{
-        id: string;
-        ref_kind: ActionObjectRef['refKind'];
-        object_type: ActionObjectRef['objectType'];
-        object_id: string;
-        label: string;
-      }>(
-        `SELECT id, ref_kind, object_type, object_id, label
+    const [refs, submissions, interpretation, request, history] =
+      await Promise.all([
+        this.database.query<{
+          id: string;
+          ref_kind: ActionObjectRef['refKind'];
+          object_type: ActionObjectRef['objectType'];
+          object_id: string;
+          label: string;
+        }>(
+          `SELECT id, ref_kind, object_type, object_id, label
          FROM action_object_refs WHERE game_id = $1 AND action_id = $2 ORDER BY id`,
-        [gameId, actionId],
-      ),
-      this.database.query<{ text: string }>(
-        `SELECT text FROM action_interpretations
+          [gameId, actionId],
+        ),
+        this.database.query<{
+          id: string;
+          version: number;
+          title: string;
+          text: string;
+          category: ActionCategory;
+          secrecy: ActionSecrecy;
+          submitted_at: Date;
+          refs: ActionSubmission['refs'];
+        }>(
+          `SELECT id, version, title, text, category, secrecy, refs, submitted_at
+         FROM action_submissions WHERE game_id = $1 AND action_id = $2
+         ORDER BY submitted_at DESC, id DESC`,
+          [gameId, actionId],
+        ),
+        this.database.query<{ text: string }>(
+          `SELECT text FROM action_interpretations
          WHERE game_id = $1 AND action_id = $2 ORDER BY created_at DESC LIMIT 1`,
-        [gameId, actionId],
-      ),
-      this.database.query<{ message: string }>(
-        `SELECT message FROM action_input_requests
+          [gameId, actionId],
+        ),
+        this.database.query<{ message: string }>(
+          `SELECT message FROM action_input_requests
          WHERE game_id = $1 AND action_id = $2 AND status = 'Pending'
          ORDER BY created_at DESC LIMIT 1`,
-        [gameId, actionId],
-      ),
-      this.database.query<{
-        from_status: ActionStatus | null;
-        to_status: ActionStatus;
-        reason: string;
-        created_at: Date;
-      }>(
-        `SELECT from_status, to_status, reason, created_at
+          [gameId, actionId],
+        ),
+        this.database.query<{
+          from_status: ActionStatus | null;
+          to_status: ActionStatus;
+          reason: string;
+          created_at: Date;
+        }>(
+          `SELECT from_status, to_status, reason, created_at
          FROM action_status_history WHERE game_id = $1 AND action_id = $2
          ORDER BY created_at, id`,
-        [gameId, actionId],
-      ),
-    ]);
+          [gameId, actionId],
+        ),
+      ]);
     return {
       ...summary(row),
       currentText: row.current_text,
@@ -403,6 +524,16 @@ export class ActionService {
       })),
       latestInterpretation: interpretation.rows[0]?.text ?? null,
       pendingInputRequest: request.rows[0]?.message ?? null,
+      submissions: submissions.rows.map((item) => ({
+        id: item.id,
+        version: item.version,
+        title: item.title,
+        text: item.text,
+        category: item.category,
+        secrecy: item.secrecy,
+        refs: item.refs,
+        submittedAt: item.submitted_at.toISOString(),
+      })),
       history: history.rows.map((item) => ({
         fromStatus: item.from_status,
         toStatus: item.to_status,
@@ -456,6 +587,7 @@ export class ActionService {
     const client = await this.database.connect();
     try {
       await client.query('BEGIN');
+      await this.lockActionQuarter(client, input.gameId, input.actionId);
       const member = await this.member(input.gameId, input.userId, client);
       const countryId = this.requirePlayer(member);
       const locked = await client.query<ActionRow>(
@@ -463,7 +595,11 @@ export class ActionService {
         [input.gameId, input.actionId],
       );
       const action = locked.rows[0];
-      if (!action || action.created_by_member_id !== member.id) {
+      if (
+        !action ||
+        action.created_by_member_id !== member.id ||
+        action.country_id !== countryId
+      ) {
         throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到该行动。');
       }
       if (!['Draft', 'NeedPlayerInput'].includes(action.status)) {
@@ -473,7 +609,13 @@ export class ActionService {
           '当前行动状态不可修改。',
         );
       }
-      await this.ensureQuarterEditable(client, input.gameId, action.quarter_id);
+      await this.ensureQuarterEditable(
+        client,
+        input.gameId,
+        action.quarter_id,
+        false,
+        input.actionId,
+      );
       if (action.version !== input.expectedVersion) {
         throw new ApiFault(
           409,
@@ -543,14 +685,19 @@ export class ActionService {
     const client = await this.database.connect();
     try {
       await client.query('BEGIN');
+      await this.lockActionQuarter(client, input.gameId, input.actionId);
       const member = await this.member(input.gameId, input.userId, client);
-      this.requirePlayer(member);
+      const countryId = this.requirePlayer(member);
       const locked = await client.query<ActionRow>(
         `${actionSelect} WHERE a.game_id = $1 AND a.id = $2 FOR UPDATE`,
         [input.gameId, input.actionId],
       );
       const action = locked.rows[0];
-      if (!action || action.created_by_member_id !== member.id) {
+      if (
+        !action ||
+        action.created_by_member_id !== member.id ||
+        action.country_id !== countryId
+      ) {
         throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到该行动。');
       }
       if (!['Draft', 'NeedPlayerInput'].includes(action.status)) {
@@ -560,7 +707,13 @@ export class ActionService {
           '当前行动状态不可保存草稿版本。',
         );
       }
-      await this.ensureQuarterEditable(client, input.gameId, action.quarter_id);
+      await this.ensureQuarterEditable(
+        client,
+        input.gameId,
+        action.quarter_id,
+        false,
+        input.actionId,
+      );
       if (action.version !== input.expectedVersion) {
         throw new ApiFault(
           409,
@@ -642,14 +795,19 @@ export class ActionService {
     const client = await this.database.connect();
     try {
       await client.query('BEGIN');
+      await this.lockActionQuarter(client, input.gameId, input.actionId);
       const member = await this.member(input.gameId, input.userId, client);
-      this.requirePlayer(member);
+      const countryId = this.requirePlayer(member);
       const result = await client.query<ActionRow>(
         `${actionSelect} WHERE a.game_id = $1 AND a.id = $2 FOR UPDATE`,
         [input.gameId, input.actionId],
       );
       const action = result.rows[0];
-      if (!action || action.created_by_member_id !== member.id) {
+      if (
+        !action ||
+        action.created_by_member_id !== member.id ||
+        action.country_id !== countryId
+      ) {
         throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到该行动。');
       }
       if (
@@ -666,11 +824,12 @@ export class ActionService {
           '当前行动状态不允许该操作。',
         );
       }
-      await this.ensureQuarterEditable(
+      const quarterState = await this.ensureQuarterEditable(
         client,
         input.gameId,
         action.quarter_id,
         true,
+        target === 'Submitted' ? input.actionId : undefined,
       );
       if (target === 'Submitted' && action.current_text.trim().length === 0) {
         throw new ApiFault(
@@ -679,24 +838,42 @@ export class ActionService {
           '提交前必须填写行动内容。',
         );
       }
+      const isSubmission = target === 'Submitted';
+      const nextStatus =
+        isSubmission && quarterState === 'HostReview' ? 'HostReview' : target;
       await client.query(
         `UPDATE actions SET status = $1,
-           submitted_original_text = CASE WHEN $1 = 'Submitted' THEN COALESCE(submitted_original_text, current_text) ELSE submitted_original_text END,
-           submit_idempotency_key = CASE WHEN $1 = 'Submitted' THEN $2 ELSE submit_idempotency_key END,
-           submitted_at = CASE WHEN $1 = 'Submitted' THEN COALESCE(submitted_at, NOW()) ELSE submitted_at END,
+           submitted_original_text = CASE WHEN $5 THEN COALESCE(submitted_original_text, current_text) ELSE submitted_original_text END,
+           submit_idempotency_key = CASE WHEN $5 THEN $2 ELSE submit_idempotency_key END,
+           submitted_at = CASE WHEN $5 THEN COALESCE(submitted_at, NOW()) ELSE submitted_at END,
            withdrawn_at = CASE WHEN $1 = 'Withdrawn' THEN NOW() ELSE withdrawn_at END,
            updated_at = NOW()
          WHERE game_id = $3 AND id = $4`,
-        [target, input.idempotencyKey, input.gameId, input.actionId],
+        [
+          nextStatus,
+          input.idempotencyKey,
+          input.gameId,
+          input.actionId,
+          isSubmission,
+        ],
       );
-      if (target === 'Submitted') {
+      if (isSubmission) {
+        await client.query(
+          `INSERT INTO action_submissions (id, game_id, action_id, version, title, text, category, secrecy, refs)
+           SELECT $1, a.game_id, a.id, a.version, a.title, a.current_text, a.category, a.secrecy,
+                  COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                    'refKind', r.ref_kind, 'objectType', r.object_type, 'objectId', r.object_id, 'label', r.label
+                  ) ORDER BY r.id) FROM action_object_refs r WHERE r.game_id = a.game_id AND r.action_id = a.id), '[]'::jsonb)
+           FROM actions a WHERE a.game_id = $2 AND a.id = $3`,
+          [randomUUID(), input.gameId, input.actionId],
+        );
         await client.query(
           `UPDATE action_input_requests SET status = 'Answered', answered_at = NOW()
            WHERE game_id = $1 AND action_id = $2 AND status = 'Pending'`,
           [input.gameId, input.actionId],
         );
       }
-      await this.addHistory(client, input, action.status, target, reason);
+      await this.addHistory(client, input, action.status, nextStatus, reason);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -736,18 +913,32 @@ export class ActionService {
     actionId: string;
     text: string;
   }): Promise<ActionDetails> {
-    const member = await this.member(input.gameId, input.userId);
-    this.requireHost(member);
-    const action = await this.get(input.gameId, input.userId, input.actionId);
-    if (action.status === 'Draft') {
-      throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到可审核行动。');
+    const client = await this.database.connect();
+    try {
+      await client.query('BEGIN');
+      const member = await this.member(input.gameId, input.userId, client);
+      this.requireHost(member);
+      this.requireReviewOpen(
+        await this.lockActionQuarter(client, input.gameId, input.actionId),
+      );
+      const action = await client.query<{ status: string }>(
+        'SELECT status FROM actions WHERE game_id = $1 AND id = $2 FOR UPDATE',
+        [input.gameId, input.actionId],
+      );
+      if (action.rows[0]?.status === 'Draft')
+        throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到可审核行动。');
+      await client.query(
+        `INSERT INTO action_interpretations (id, game_id, action_id, text, created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [randomUUID(), input.gameId, input.actionId, input.text, input.userId],
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
-    await this.database.query(
-      `INSERT INTO action_interpretations (
-         id, game_id, action_id, text, created_by_user_id
-       ) VALUES ($1,$2,$3,$4,$5)`,
-      [randomUUID(), input.gameId, input.actionId, input.text, input.userId],
-    );
     return this.get(input.gameId, input.userId, input.actionId);
   }
 
@@ -763,6 +954,9 @@ export class ActionService {
       await client.query('BEGIN');
       const member = await this.member(input.gameId, input.userId, client);
       this.requireHost(member);
+      this.requireReviewOpen(
+        await this.lockActionQuarter(client, input.gameId, input.actionId),
+      );
       const result = await client.query<ActionRow>(
         `${actionSelect} WHERE a.game_id = $1 AND a.id = $2 FOR UPDATE`,
         [input.gameId, input.actionId],
@@ -784,16 +978,31 @@ export class ActionService {
         );
       }
       if (input.target === 'NeedPlayerInput') {
+        const requestId = randomUUID();
         await client.query(
           `INSERT INTO action_input_requests (
              id, game_id, action_id, message, created_by_user_id
            ) VALUES ($1,$2,$3,$4,$5)`,
+          [requestId, input.gameId, input.actionId, input.reason, input.userId],
+        );
+        const conversationId = await ensurePolicyConversation(
+          client,
+          input.gameId,
+          member.id,
+          input.actionId,
+        );
+        await client.query(
+          `WITH inserted AS (
+             INSERT INTO messages (id, game_id, conversation_id, sender_member_id, content, client_message_id, sent_at)
+             VALUES ($1,$2,$3,$4,$5,$1,(SELECT GREATEST(clock_timestamp(), last_message_at + INTERVAL '1 microsecond') FROM conversations WHERE id = $3)) RETURNING sent_at
+           ) UPDATE conversations SET last_message_at = GREATEST(last_message_at, (SELECT sent_at FROM inserted))
+             WHERE game_id = $2 AND id = $3`,
           [
-            randomUUID(),
+            requestId,
             input.gameId,
-            input.actionId,
-            input.reason,
-            input.userId,
+            conversationId,
+            member.id,
+            `要求补充：${input.reason}\n\n请修改政策后重新提交。`,
           ],
         );
       }

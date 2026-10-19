@@ -5,3 +5,4 @@ pnpm-lock.yaml
 .pnpm-store
 .codex
 docs
+backups/

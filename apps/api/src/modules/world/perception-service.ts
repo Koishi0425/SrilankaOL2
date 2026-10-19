@@ -43,6 +43,19 @@ export function hasCurrentState(state: DiscoveryState): boolean {
   return state === 'Observed';
 }
 
+export function knowsAdministration(
+  state: DiscoveryState,
+  snapshot: { administrationKnown?: boolean } | null | undefined,
+): boolean {
+  return (
+    hasStableGeography(state) &&
+    (snapshot?.administrationKnown ??
+      (state === 'Observed' || state === 'Outdated'))
+  );
+}
+
+export const knownAdministrationSql = `COALESCE((k.snapshot->>'administrationKnown')::boolean,k.discovery_state IN ('Observed','Outdated'))`;
+
 export function projectArmy(
   row: PerceivedArmyRow,
   view: ViewContext,
@@ -91,21 +104,29 @@ export function hideUnknownTile(
   state: DiscoveryState,
 ): MapTileSummary {
   const stable = hasStableGeography(state);
-  const current = hasCurrentState(state);
+  const terrain = stable || state === 'Discovered';
+  const current = hasCurrentState(state) || state === 'Outdated';
   return {
     ...tile,
     discoveryState: state,
-    terrainKey: stable ? tile.terrainKey : null,
-    terrainName: stable ? tile.terrainName : null,
-    terrainColor: stable ? tile.terrainColor : null,
+    terrainKey: terrain ? tile.terrainKey : null,
+    terrainName: terrain ? tile.terrainName : null,
+    terrainColor: terrain ? tile.terrainColor : null,
     regionId: stable ? tile.regionId : null,
     regionName: stable ? tile.regionName : null,
     controllerCountryId: current ? tile.controllerCountryId : null,
     controllerCountryName: current ? tile.controllerCountryName : null,
     controllerColor: current ? tile.controllerColor : null,
+    legalOwnerCountryId: current ? (tile.legalOwnerCountryId ?? null) : null,
+    legalOwnerCountryName: current
+      ? (tile.legalOwnerCountryName ?? null)
+      : null,
+    legalOwnerColor: current ? (tile.legalOwnerColor ?? null) : null,
     passable: stable ? tile.passable : null,
     movementCost: stable ? tile.movementCost : null,
-    cities: stable ? tile.cities : [],
-    armies: tile.armies,
+    cities: terrain ? tile.cities : [],
+    armies: tile.armies.filter(
+      (army) => army.strength.kind === 'Exact' || terrain,
+    ),
   };
 }

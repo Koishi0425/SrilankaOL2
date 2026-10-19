@@ -4,19 +4,9 @@ import { z } from 'zod';
 import { requireUser, sendApiError } from '../auth/auth-routes.js';
 import type { AuthService } from '../auth/auth-service.js';
 import type { ActionService } from './action-service.js';
+import { actionCategorySchema } from '../games/game-rules.js';
 
-const category = z.enum([
-  'EventResponse',
-  'Policy',
-  'Reform',
-  'Diplomacy',
-  'Construction',
-  'Research',
-  'Recruitment',
-  'Military',
-  'Intelligence',
-  'Custom',
-]);
+const category = actionCategorySchema;
 const secrecy = z.enum(['OwnerOnly', 'Participants', 'Public']);
 const refSchema = z.object({
   refKind: z.enum(['Actor', 'Target', 'Context']),
@@ -27,11 +17,13 @@ const refSchema = z.object({
     'Country',
     'Character',
     'Region',
+    'Province',
   ]),
   objectId: z.string().uuid(),
   label: z.string().trim().max(160).default(''),
 });
 const createSchema = z.object({
+  creationId: z.string().uuid().optional(),
   quarterId: z.string().uuid(),
   title: z.string().trim().min(1).max(160),
   originalText: z.string().max(20_000),

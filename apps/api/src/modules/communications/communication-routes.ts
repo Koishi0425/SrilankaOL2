@@ -25,10 +25,13 @@ const messageSchema = z.object({
   content: z.string().trim().min(1).max(10_000),
   clientMessageId: z.string().uuid(),
 });
-const pageSchema = z.object({
-  cursor: z.string().uuid().optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
-});
+const pageSchema = z
+  .object({
+    cursor: z.string().uuid().optional(),
+    after: z.string().uuid().optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+  })
+  .refine((value) => !(value.cursor && value.after));
 
 function parse<T>(
   request: FastifyRequest,
@@ -59,6 +62,50 @@ export async function registerCommunicationRoutes(
   auth: AuthService,
   communications: CommunicationService,
 ) {
+  app.post(
+    '/api/v1/games/:gameId/conversations/host',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      const params = parse(request, reply, gameParams, request.params);
+      const body = parse(
+        request,
+        reply,
+        z.object({ memberId: z.string().uuid().optional() }),
+        request.body,
+      );
+      if (!user || !params || !body) return reply;
+      return reply.send(
+        envelope(
+          request,
+          await communications.openHost(params.gameId, user.id, body.memberId),
+        ),
+      );
+    },
+  );
+
+  app.post(
+    '/api/v1/games/:gameId/actions/:actionId/conversation',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      const params = parse(
+        request,
+        reply,
+        gameParams.extend({ actionId: z.string().uuid() }),
+        request.params,
+      );
+      if (!user || !params) return reply;
+      return reply.send(
+        envelope(
+          request,
+          await communications.openPolicy(
+            params.gameId,
+            user.id,
+            params.actionId,
+          ),
+        ),
+      );
+    },
+  );
   app.get('/api/v1/games/:gameId/conversations', async (request, reply) => {
     const user = await requireUser(request, reply, auth);
     const params = parse(request, reply, gameParams, request.params);

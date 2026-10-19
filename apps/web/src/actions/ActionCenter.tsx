@@ -1,3 +1,4 @@
+import { isGameReadOnly } from '@srilanka/contracts';
 import {
   type FormEvent,
   useCallback,
@@ -14,6 +15,7 @@ import type {
   ActionSummary,
   ActionVersion,
   GameSummary,
+  GameRulesData,
   QuarterSummary,
 } from '@srilanka/contracts';
 
@@ -31,14 +33,74 @@ import {
   updateAction,
   withdrawAction,
 } from '../api.js';
+import { categories, categoryName } from './action-labels.js';
+import {
+  DraftRecovery,
+  priorPolicyDraftKey,
+  useDraftKey,
+  useLocalDraft,
+} from '../drafts/local-drafts.js';
+import type { MapRevealSeed } from '../map/MapSetupPanel.js';
+import {
+  ActionMapLinks,
+  type MapActionReference,
+} from '../map/ActionMapLinks.js';
 
 export interface ActionDraftSeed {
   key: number;
   title: string;
+  category?: ActionCategory;
   ref: Omit<ActionObjectRef, 'id'>;
 }
 
 type DraftRef = Omit<ActionObjectRef, 'id'>;
+interface PolicyLocalDraft {
+  creationId?: string;
+  quarterId: string;
+  baseVersion: number | null;
+  baseUpdatedAt: string | null;
+  title: string;
+  text: string;
+  category: ActionCategory;
+  secrecy: ActionSecrecy;
+  refs: DraftRef[];
+}
+function isPolicyDraft(value: unknown): value is PolicyLocalDraft {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as PolicyLocalDraft;
+  if (typeof v.quarterId !== 'string') return false;
+  if (
+    v.creationId !== undefined &&
+    (typeof v.creationId !== 'string' ||
+      !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(v.creationId))
+  )
+    return false;
+  return (
+    (v.baseVersion === null || Number.isInteger(v.baseVersion)) &&
+    (v.baseUpdatedAt === null || typeof v.baseUpdatedAt === 'string') &&
+    typeof v.title === 'string' &&
+    typeof v.text === 'string' &&
+    categories.some(([key]) => key === v.category) &&
+    ['OwnerOnly', 'Participants', 'Public'].includes(v.secrecy) &&
+    Array.isArray(v.refs) &&
+    v.refs.every(
+      (ref) =>
+        ref &&
+        ['Actor', 'Target', 'Context'].includes(ref.refKind) &&
+        [
+          'Tile',
+          'City',
+          'Army',
+          'Country',
+          'Character',
+          'Region',
+          'Province',
+        ].includes(ref.objectType) &&
+        typeof ref.objectId === 'string' &&
+        typeof ref.label === 'string',
+    )
+  );
+}
 
 export function mergeActionRefs(
   current: DraftRef[],
@@ -66,7 +128,14 @@ export function applyMapSeedToDraft(
     ...current,
     title: current.title || seed.title,
     category:
-      current.category === 'Custom' ? ('Policy' as const) : current.category,
+      !current.title && !current.text && !current.refs.length
+        ? (seed.category ??
+          (current.category === 'Custom'
+            ? ('Policy' as const)
+            : current.category))
+        : current.category === 'Custom'
+          ? ('Policy' as const)
+          : current.category,
     refs: mergeActionRefs(current.refs, seed.ref),
   };
 }
@@ -80,7 +149,7 @@ export function editableFieldsFromVersion(version: ActionVersion) {
   };
 }
 
-const statusNames: Record<ActionSummary['status'], string> = {
+export const statusNames: Record<ActionSummary['status'], string> = {
   Draft: '草稿',
   Submitted: '已提交',
   HostReview: '主持人审核中',
@@ -96,39 +165,43 @@ const statusNames: Record<ActionSummary['status'], string> = {
   Invalidated: '已失效',
 };
 
-const categories: Array<[ActionCategory, string]> = [
-  ['Policy', '政策'],
-  ['Diplomacy', '外交'],
-  ['Construction', '建设'],
-  ['Research', '研究'],
-  ['Recruitment', '征募'],
-  ['Military', '军事'],
-  ['Intelligence', '情报'],
-  ['Reform', '改革'],
-  ['EventResponse', '事件回应'],
-  ['Custom', '自定义'],
-];
-
 const secrecyNames: Record<ActionSecrecy, string> = {
   OwnerOnly: '仅本国与主持人',
-  Participants: '相关参与方',
-  Public: '公开',
+  Participants: '请求告知相关方',
+  Public: '请求公开',
 };
 
 export function ActionCenter({
   game,
+  rules,
   seed,
   onQuarterChange,
   onSeedConsumed,
+  onOpenSettlement,
+  onDiscussAction,
+  onMapReveal,
+  onLocateReference,
+  onPrepareOpening,
+  focus,
+  active = true,
   variant = 'standalone',
 }: {
   game: GameSummary;
+  rules?: GameRulesData | null;
   seed?: ActionDraftSeed;
   onQuarterChange?: (quarter: QuarterSummary) => void;
   onSeedConsumed?: (key: number) => void;
+  onOpenSettlement?: (actionId?: string) => void;
+  onLocateReference?: (ref: MapActionReference) => Promise<void>;
+  onDiscussAction?: (actionId: string) => Promise<void>;
+  onMapReveal?: (input: Omit<MapRevealSeed, 'key'>) => void;
+  onPrepareOpening?: () => void;
+  focus?: { actionId: string; key: number };
+  active?: boolean;
   variant?: 'standalone' | 'map';
 }) {
   const host = game.role === 'Host' || game.role === 'Administrator';
+  const readOnly = isGameReadOnly(game.status);
   const [quarter, setQuarter] = useState<QuarterSummary>(game.currentQuarter);
   const [items, setItems] = useState<ActionSummary[]>([]);
   const [selected, setSelected] = useState<ActionDetails | null>(null);
@@ -141,22 +214,126 @@ export function ActionCenter({
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState('');
   const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const [savingVersion, setSavingVersion] = useState(false);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [reviewText, setReviewText] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
+  const [creatingDraft, setCreatingDraft] = useState(false);
+  const createPending = useRef(false);
+  const creationId = useRef<string>(crypto.randomUUID());
+  const creationQuarter = useRef(quarter.id);
+  if (creationQuarter.current !== quarter.id) {
+    creationQuarter.current = quarter.id;
+    creationId.current = crypto.randomUUID();
+  }
+  const localKey = useDraftKey(
+    game.id,
+    selected?.quarterId ?? quarter.id,
+    'policy',
+    selected?.id ?? 'new',
+  );
+  const local = useLocalDraft(
+    selected ? localKey : priorPolicyDraftKey(localKey),
+    isPolicyDraft,
+  );
+  const localCandidate = local.candidate;
+  const canRestoreLocal =
+    local.candidate?.value.quarterId === quarter.id &&
+    !readOnly &&
+    !host &&
+    (!selected ||
+      (selected.quarterId === quarter.id &&
+        ['Draft', 'NeedPlayerInput'].includes(selected.status))) &&
+    (!selected
+      ? localCandidate?.value.baseVersion === null
+      : localCandidate?.value.baseVersion === selected.version &&
+        localCandidate.value.baseUpdatedAt === selected.updatedAt);
+
+  useEffect(() => {
+    if (host || readOnly || localCandidate || creatingDraft) return;
+    const fields = { title, text, category, secrecy, refs };
+    const same =
+      selected &&
+      JSON.stringify(fields) ===
+        JSON.stringify({
+          title: selected.title,
+          text: selected.currentText,
+          category: selected.category,
+          secrecy: selected.secrecy,
+          refs: selected.refs.map(({ id: _id, ...ref }) => ref),
+        });
+    if ((!selected && !title && !text && !refs.length) || same) {
+      if (local.session.saved) local.clear();
+      return;
+    }
+    if (
+      selected &&
+      (selected.quarterId !== quarter.id ||
+        !['Draft', 'NeedPlayerInput'].includes(selected.status))
+    )
+      return;
+    local.write({
+      ...fields,
+      ...(!selected ? { creationId: creationId.current } : {}),
+      quarterId: quarter.id,
+      baseVersion: selected?.version ?? null,
+      baseUpdatedAt: selected?.updatedAt ?? null,
+    });
+  }, [
+    host,
+    readOnly,
+    localCandidate,
+    creatingDraft,
+    title,
+    text,
+    category,
+    secrecy,
+    refs,
+    selected,
+    quarter.id,
+    local.write,
+    local.clear,
+    local.session,
+  ]);
   const handledSeedKey = useRef<number | null>(null);
+  const activeActionId = useRef<string | null>(null);
+  const handledFocus = useRef<number | undefined>(undefined);
+  const listRequest = useRef(0);
+  const liveSelection = useRef({
+    selected,
+    dirty,
+    saving,
+    savingVersion,
+    confirmSubmit,
+    saveFailed,
+  });
+  liveSelection.current = {
+    selected,
+    dirty,
+    saving,
+    savingVersion,
+    confirmSubmit,
+    saveFailed,
+  };
 
   const load = useCallback(async () => {
+    const request = ++listRequest.current;
     try {
-      setItems(await fetchActions(game.id, host));
+      const next = (await fetchActions(game.id, host && !readOnly)).filter(
+        (item) => readOnly || item.quarterId === game.currentQuarter.id,
+      );
+      if (request !== listRequest.current) return;
+      setItems(next);
+      return next;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '行动列表加载失败');
+      if (request === listRequest.current)
+        setError(cause instanceof Error ? cause.message : '行动列表加载失败');
     }
-  }, [game.id, host]);
+  }, [game.id, game.currentQuarter.id, host, readOnly]);
 
-  useEffect(() => void load(), [load]);
+  useEffect(() => setQuarter(game.currentQuarter), [game.currentQuarter]);
 
   useEffect(() => {
     if (!seed || host || handledSeedKey.current === seed.key) return;
@@ -165,14 +342,17 @@ export function ActionCenter({
     const canAppendToSelected =
       selected && ['Draft', 'NeedPlayerInput'].includes(selected.status);
     if (selected && !canAppendToSelected) {
+      creationId.current = crypto.randomUUID();
+      activeActionId.current = null;
       setSelected(null);
       setTitle(seed.title);
       setText('');
-      setCategory('Policy');
+      setCategory(seed.category ?? 'Policy');
       setSecrecy('OwnerOnly');
       setRefs([seed.ref]);
       setDirty(false);
       setSaving(false);
+      setSaveFailed(false);
       setSaveState('已基于地图目标开始一份新草稿。');
       setConfirmSubmit(false);
       onSeedConsumed?.(seed.key);
@@ -201,7 +381,8 @@ export function ActionCenter({
     onSeedConsumed?.(seed.key);
   }, [category, host, onSeedConsumed, refs, seed, selected, text, title]);
 
-  function edit(details: ActionDetails) {
+  const edit = useCallback((details: ActionDetails) => {
+    activeActionId.current = details.id;
     setSelected(details);
     setTitle(details.title);
     setText(details.currentText);
@@ -210,27 +391,123 @@ export function ActionCenter({
     setRefs(details.refs.map(({ id: _id, ...ref }) => ref));
     setDirty(false);
     setSaving(false);
+    setSaveFailed(false);
     setSavingVersion(false);
     setSaveState('');
     setConfirmSubmit(false);
-  }
+  }, []);
 
-  async function open(actionId: string) {
-    try {
-      const details = await fetchAction(game.id, actionId);
-      edit(details);
-      setVersions(await fetchActionVersions(game.id, actionId));
-      setError('');
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '行动读取失败');
+  useEffect(() => {
+    if (!active) return;
+    let disposed = false,
+      reading = false;
+    async function refresh() {
+      if (reading || document.hidden) return;
+      reading = true;
+      try {
+        const next = await load();
+        if (disposed || !next) return;
+        const before = liveSelection.current;
+        const previous = before.selected;
+        if (
+          !previous ||
+          before.dirty ||
+          before.saving ||
+          before.savingVersion ||
+          before.saveFailed ||
+          before.confirmSubmit
+        )
+          return;
+        const summary = next.find((item) => item.id === previous.id);
+        const unfinishedHistory =
+          previous.quarterId !== game.currentQuarter.id &&
+          !['Completed', 'Rejected', 'Withdrawn', 'Invalidated'].includes(
+            previous.status,
+          );
+        if (
+          (!summary && !unfinishedHistory) ||
+          (summary &&
+            summary.version === previous.version &&
+            summary.status === previous.status &&
+            summary.updatedAt === previous.updatedAt)
+        )
+          return;
+        const details = await fetchAction(game.id, previous.id);
+        const current = liveSelection.current;
+        if (
+          disposed ||
+          current.selected?.id !== previous.id ||
+          current.selected.version !== previous.version ||
+          current.selected.updatedAt !== previous.updatedAt ||
+          current.dirty ||
+          current.saving ||
+          current.savingVersion ||
+          current.saveFailed ||
+          current.confirmSubmit
+        )
+          return;
+        if (
+          details.version === previous.version &&
+          details.status === previous.status &&
+          details.updatedAt === previous.updatedAt
+        )
+          return;
+        edit(details);
+        const history = await fetchActionVersions(game.id, details.id);
+        if (
+          !disposed &&
+          activeActionId.current === details.id &&
+          liveSelection.current.selected?.version === details.version
+        )
+          setVersions(history);
+      } catch (cause) {
+        if (!disposed)
+          setError(cause instanceof Error ? cause.message : '行动更新失败');
+      } finally {
+        reading = false;
+      }
     }
-  }
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      disposed = true;
+      ++listRequest.current;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [active, edit, game.id, game.currentQuarter.id, load]);
+
+  const open = useCallback(
+    async (actionId: string) => {
+      try {
+        const details = await fetchAction(game.id, actionId);
+        if (activeActionId.current === actionId && local.session.saved)
+          local.hold();
+        edit(details);
+        setVersions(await fetchActionVersions(game.id, actionId));
+        setError('');
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '行动读取失败');
+      }
+    },
+    [edit, game.id, local.session, local.hold],
+  );
+
+  useEffect(() => {
+    if (!focus || handledFocus.current === focus.key) return;
+    handledFocus.current = focus.key;
+    void open(focus.actionId);
+  }, [focus, open]);
 
   useEffect(() => {
     if (
+      readOnly ||
+      !!localCandidate ||
       host ||
       !selected ||
       !dirty ||
+      saving ||
       !['Draft', 'NeedPlayerInput'].includes(selected.status)
     )
       return;
@@ -238,6 +515,7 @@ export function ActionCenter({
     const timeout = window.setTimeout(() => {
       setSaveState('正在保存…');
       setSaving(true);
+      setSaveFailed(false);
       const expectedVersion = selected.version;
       setDirty(false);
       void updateAction(game.id, selected.id, {
@@ -249,12 +527,14 @@ export function ActionCenter({
         refs,
       })
         .then((details) => {
+          if (activeActionId.current !== details.id) return;
           setSelected(details);
           setSaving(false);
-          setSaveState(`恢复草稿已自动保存 · 修订 ${details.version}`);
+          setSaveState('已自动保存');
           void load();
         })
         .catch((cause: unknown) => {
+          if (activeActionId.current !== selected.id) return;
           if (
             cause instanceof ApiRequestError &&
             cause.code === 'ACTION_VERSION_CONFLICT'
@@ -264,6 +544,7 @@ export function ActionCenter({
             setSaveState(cause instanceof Error ? cause.message : '保存失败');
           }
           setSaving(false);
+          setSaveFailed(true);
         });
     }, 800);
     return () => window.clearTimeout(timeout);
@@ -272,9 +553,12 @@ export function ActionCenter({
     dirty,
     game.id,
     host,
+    readOnly,
+    localCandidate,
     load,
     refs,
     secrecy,
+    saving,
     selected,
     text,
     title,
@@ -282,8 +566,12 @@ export function ActionCenter({
 
   async function create(event: FormEvent) {
     event.preventDefault();
+    if (selected || createPending.current || localCandidate) return;
+    createPending.current = true;
+    setCreatingDraft(true);
     try {
       const details = await createAction(game.id, {
+        creationId: creationId.current,
         quarterId: quarter.id,
         title,
         originalText: text,
@@ -291,12 +579,17 @@ export function ActionCenter({
         secrecy,
         refs,
       });
+      local.clear();
       edit(details);
       setVersions(await fetchActionVersions(game.id, details.id));
-      setSaveState('草稿已创建，并生成了初始手动版本。');
+      setSaveState('草稿已创建');
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '创建草稿失败');
+      void load();
+    } finally {
+      createPending.current = false;
+      setCreatingDraft(false);
     }
   }
 
@@ -336,7 +629,7 @@ export function ActionCenter({
   }
 
   async function confirmVersion() {
-    if (!selected || dirty || saving) return;
+    if (!selected || dirty || saving || saveFailed) return;
     setSavingVersion(true);
     try {
       const savedVersions = await saveActionVersion(
@@ -345,7 +638,7 @@ export function ActionCenter({
         selected.version,
       );
       setVersions(savedVersions);
-      setSaveState(`已手动保存为版本 ${savedVersions.length}。`);
+      setSaveState('版本已保存');
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '手动保存版本失败');
@@ -369,7 +662,7 @@ export function ActionCenter({
     setSecrecy(fields.secrecy);
     setDirty(true);
     setConfirmSubmit(false);
-    setSaveState(`已载入版本 ${version.version}，等待保存为新版本…`);
+    setSaveState('已载入，等待自动保存…');
   }
 
   async function changeQuarter(
@@ -380,33 +673,78 @@ export function ActionCenter({
       setQuarter(updated);
       onQuarterChange?.(updated);
       setError('');
+      await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '季度状态修改失败');
     }
   }
 
   const editable =
-    !host && selected && ['Draft', 'NeedPlayerInput'].includes(selected.status);
+    !readOnly &&
+    !host &&
+    selected &&
+    selected.quarterId === quarter.id &&
+    ['Draft', 'NeedPlayerInput'].includes(selected.status);
+  const requestedSupplement =
+    selected?.quarterId === quarter.id &&
+    selected?.status === 'NeedPlayerInput' &&
+    !!selected.pendingInputRequest;
+  const canSubmit =
+    quarter.state === 'ActionSubmission' ||
+    (requestedSupplement && ['Locked', 'HostReview'].includes(quarter.state));
+  const currentRules = rules?.quarterId === quarter.id ? rules.quarter : null;
+  function countSubmitted(category: ActionCategory) {
+    return items.filter(
+      (item) =>
+        item.quarterId === quarter.id &&
+        item.category === category &&
+        !['Draft', 'Withdrawn', 'Rejected', 'Invalidated'].includes(
+          item.status,
+        ),
+    ).length;
+  }
+  const suggestedLimit = currentRules?.suggestedLimits.find(
+    (item) => item.category === category,
+  );
+  const categoryCount = countSubmitted(category);
+  const countedSelected =
+    selected &&
+    selected.quarterId === quarter.id &&
+    selected.category === category &&
+    !['Draft', 'Withdrawn', 'Rejected', 'Invalidated'].includes(
+      selected.status,
+    );
+  const overSuggestion =
+    suggestedLimit &&
+    categoryCount + (countedSelected ? 0 : 1) > suggestedLimit.limit;
 
   return (
     <section
-      className={`work-center${variant === 'map' ? ' work-center--map' : ''}`}
+      className={`work-center action-center${variant === 'map' ? ' work-center--map' : ''}`}
     >
       <header className="center-heading">
         <div>
-          <p className="eyebrow">ACTION CENTER</p>
-          <h3>{host ? '主持人行动审核' : '政策与行动'}</h3>
+          <h3>
+            {readOnly ? '政策记录' : host ? '主持人行动审核' : '政策与行动'}
+          </h3>
         </div>
-        <span className="tag">季度状态：{quarter.state}</span>
       </header>
-      {host && (
+      {host && !readOnly && (
         <div className="quarter-actions">
           {['Preparing', 'EventResponse', 'Locked', 'HostReview'].includes(
             quarter.state,
           ) && (
             <button
               className="button"
-              onClick={() => void changeQuarter('ActionSubmission')}
+              onClick={() => {
+                if (
+                  quarter.state === 'Preparing' &&
+                  quarter.sequenceNumber === 1 &&
+                  onPrepareOpening
+                )
+                  onPrepareOpening();
+                else void changeQuarter('ActionSubmission');
+              }}
             >
               {['Locked', 'HostReview'].includes(quarter.state)
                 ? '重新开放政策提交'
@@ -429,16 +767,49 @@ export function ActionCenter({
               进入主持人审核
             </button>
           )}
+          {['HostReview', 'Resolving', 'Published'].includes(quarter.state) &&
+            onOpenSettlement && (
+              <button onClick={() => onOpenSettlement()}>前往结算</button>
+            )}
         </div>
       )}
       {error && <p className="form-error">{error}</p>}
+      {currentRules &&
+        (currentRules.briefing ||
+          currentRules.actionGuidelines ||
+          currentRules.suggestedLimits.length > 0) && (
+          <details className="round-guidance">
+            <summary>本回合行动指引</summary>
+            {currentRules.briefing && (
+              <p className="rules-text">{currentRules.briefing}</p>
+            )}
+            {currentRules.actionGuidelines && (
+              <p className="rules-text">{currentRules.actionGuidelines}</p>
+            )}
+            <div className="tag-list">
+              {currentRules.suggestedLimits.map((item) => (
+                <span className="tag" key={item.category}>
+                  {categoryName(item.category)}：
+                  {host
+                    ? `建议每国 ${item.limit} 项`
+                    : `已提交 ${countSubmitted(item.category)} / 建议 ${item.limit} 项`}
+                </span>
+              ))}
+            </div>
+            {currentRules.suggestedLimits.length > 0 && (
+              <p className="muted">超额仍可提交，由主持人裁决。</p>
+            )}
+          </details>
+        )}
       <div className="center-layout">
         <aside className="center-list">
-          {!host && (
+          {!host && !readOnly && (
             <button
               className="button"
               type="button"
               onClick={() => {
+                activeActionId.current = null;
+                creationId.current = crypto.randomUUID();
                 setSelected(null);
                 setTitle('');
                 setText('');
@@ -446,6 +817,8 @@ export function ActionCenter({
                 setSecrecy('OwnerOnly');
                 setRefs([]);
                 setDirty(false);
+                setSaving(false);
+                setSaveFailed(false);
                 setSaveState('选择地图地块可把它加入这份新草稿。');
                 setConfirmSubmit(false);
               }}
@@ -468,138 +841,245 @@ export function ActionCenter({
           {items.length === 0 && <p className="muted">暂无行动。</p>}
         </aside>
         <div className="center-detail">
-          {!host && (!selected || editable) && (
+          {!host && local.error && (
+            <p role="alert" className="form-error">
+              {local.error}
+            </p>
+          )}
+          {!host && localCandidate && (
+            <DraftRecovery
+              savedAt={localCandidate.savedAt}
+              canRestore={canRestoreLocal}
+              preview={`${localCandidate.value.title}\n\n${localCandidate.value.text}`}
+              onDiscard={local.clear}
+              onRestore={() => {
+                const saved = localCandidate.value;
+                if (!selected && saved.creationId)
+                  creationId.current = saved.creationId;
+                setTitle(saved.title);
+                setText(saved.text);
+                setCategory(saved.category);
+                setSecrecy(saved.secrecy);
+                setRefs(saved.refs);
+                local.resume();
+                setDirty(true);
+                setSaveState('已恢复本地稿，尚未保存到服务器');
+              }}
+            />
+          )}
+          {!host && !readOnly && (!selected || editable) && (
             <form
               className="action-editor"
               onSubmit={(event) => void create(event)}
             >
-              <label>
-                行动标题
-                <input
-                  required
-                  maxLength={160}
-                  value={title}
-                  onChange={(event) => {
-                    setTitle(event.target.value);
-                    setDirty(true);
-                  }}
-                />
-              </label>
-              <div className="inline-fields">
+              <fieldset
+                className="draft-fields"
+                disabled={!!localCandidate || creatingDraft}
+              >
                 <label>
-                  类别
-                  <select
-                    value={category}
+                  行动标题
+                  <input
+                    required
+                    maxLength={160}
+                    value={title}
                     onChange={(event) => {
-                      setCategory(event.target.value as ActionCategory);
+                      setTitle(event.target.value);
                       setDirty(true);
                     }}
-                  >
-                    {categories.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </label>
-                <label>
-                  保密等级
-                  <select
-                    value={secrecy}
-                    onChange={(event) => {
-                      setSecrecy(event.target.value as ActionSecrecy);
-                      setDirty(true);
-                    }}
-                  >
-                    <option value="OwnerOnly">仅本国与主持人</option>
-                    <option value="Participants">相关参与方</option>
-                    <option value="Public">公开</option>
-                  </select>
-                </label>
-              </div>
-              {refs.length > 0 && (
-                <div className="reference-list" aria-label="行动关联目标">
-                  {refs.map((ref) => (
-                    <span
-                      className="tag"
-                      key={`${ref.refKind}-${ref.objectId}`}
+                <div className="inline-fields">
+                  <label>
+                    类别
+                    <select
+                      value={category}
+                      onChange={(event) => {
+                        setCategory(event.target.value as ActionCategory);
+                        setDirty(true);
+                      }}
                     >
-                      {ref.objectType} · {ref.label || ref.objectId}
-                      <button
-                        type="button"
-                        aria-label={`移除目标 ${ref.label || ref.objectId}`}
-                        onClick={() => {
-                          setRefs((current) =>
-                            current.filter(
-                              (item) =>
-                                !(
-                                  item.refKind === ref.refKind &&
-                                  item.objectType === ref.objectType &&
-                                  item.objectId === ref.objectId
-                                ),
-                            ),
-                          );
-                          if (selected) setDirty(true);
-                          setSaveState(
-                            selected
-                              ? '已移除地图目标，等待自动保存…'
-                              : '已从新草稿移除地图目标。',
-                          );
-                        }}
+                      {categories.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    公开意向
+                    <select
+                      value={secrecy}
+                      onChange={(event) => {
+                        setSecrecy(event.target.value as ActionSecrecy);
+                        setDirty(true);
+                      }}
+                    >
+                      <option value="OwnerOnly">仅本国与主持人</option>
+                      <option value="Participants">请主持人告知相关方</option>
+                      <option value="Public">请主持人公开</option>
+                    </select>
+                  </label>
+                </div>
+                {overSuggestion && (
+                  <p className="review-request">
+                    此行动将超出{categoryName(category)}
+                    的建议额度，仍可提交，请说明特殊安排，交由主持人裁决。
+                  </p>
+                )}
+                {refs.length > 0 && (
+                  <div className="reference-list" aria-label="行动关联目标">
+                    {refs.map((ref) => (
+                      <span
+                        className="tag"
+                        key={`${ref.refKind}-${ref.objectId}`}
                       >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              <label>
-                政策 / 行动内容
-                <textarea
-                  rows={12}
-                  maxLength={20_000}
-                  value={text}
-                  onChange={(event) => {
-                    setText(event.target.value);
-                    setDirty(true);
-                  }}
-                  placeholder="说明目标、执行方式、投入、备用计划和保密要求……"
-                />
-              </label>
-              {!selected && (
-                <button className="button" type="submit">
-                  创建草稿
-                </button>
-              )}
-              {selected && (
-                <div className="draft-save-status">
-                  <div>
-                    <p className="muted">
-                      {saveState || `恢复草稿修订 ${selected.version}`}
-                    </p>
-                    <small>
-                      自动保存仅用于恢复进度；需要回退或对比时，请手动保存版本。
-                    </small>
+                        {ref.label || ref.objectId}
+                        <button
+                          type="button"
+                          aria-label={`移除目标 ${ref.label || ref.objectId}`}
+                          onClick={() => {
+                            setRefs((current) =>
+                              current.filter(
+                                (item) =>
+                                  !(
+                                    item.refKind === ref.refKind &&
+                                    item.objectType === ref.objectType &&
+                                    item.objectId === ref.objectId
+                                  ),
+                              ),
+                            );
+                            if (selected) setDirty(true);
+                            setSaveState(
+                              selected
+                                ? '已移除地图目标，等待自动保存…'
+                                : '已从新草稿移除地图目标。',
+                            );
+                          }}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
                   </div>
-                  <button
-                    className="button"
-                    type="button"
-                    disabled={dirty || saving || savingVersion}
-                    onClick={() => void confirmVersion()}
-                  >
-                    {savingVersion
-                      ? '正在保存版本…'
-                      : dirty || saving
-                        ? '等待自动保存'
-                        : '手动保存版本'}
+                )}
+                <label>
+                  政策 / 行动内容
+                  <textarea
+                    rows={12}
+                    maxLength={20_000}
+                    value={text}
+                    onChange={(event) => {
+                      setText(event.target.value);
+                      setDirty(true);
+                    }}
+                    placeholder="填写目标、做法和投入"
+                  />
+                </label>
+                {!selected && (
+                  <button className="button" type="submit">
+                    {creatingDraft ? '创建中…' : '创建草稿'}
                   </button>
-                </div>
-              )}
+                )}
+                {!selected &&
+                  localKey &&
+                  local.session.saved &&
+                  !localCandidate &&
+                  !local.error && (
+                    <p className="muted" role="status">
+                      已在此设备暂存，尚未创建政策
+                    </p>
+                  )}
+                {selected && (
+                  <div className="draft-save-status">
+                    <div>
+                      <p className="muted">{saveState || '已保存'}</p>
+                    </div>
+                    <button
+                      className="button"
+                      type="button"
+                      disabled={dirty || saving || saveFailed || savingVersion}
+                      onClick={() => void confirmVersion()}
+                    >
+                      {savingVersion
+                        ? '正在保存版本…'
+                        : dirty || saving
+                          ? '等待自动保存'
+                          : '手动保存版本'}
+                    </button>
+                    {saveFailed && (
+                      <button
+                        className="button"
+                        type="button"
+                        onClick={() => setDirty(true)}
+                      >
+                        重试保存草稿
+                      </button>
+                    )}
+                  </div>
+                )}
+              </fieldset>
             </form>
           )}
           {selected && (
             <div className="action-status-panel">
               <h4>{selected.title}</h4>
+              <ActionMapLinks
+                refs={selected.submissions[0]?.refs ?? selected.refs}
+                onLocate={onLocateReference}
+              />
+              {host &&
+                !readOnly &&
+                onOpenSettlement &&
+                selected.quarterId === quarter.id &&
+                selected.status === 'Approved' &&
+                ['HostReview', 'Resolving'].includes(quarter.state) && (
+                  <button onClick={() => onOpenSettlement(selected.id)}>
+                    结算这份政策
+                  </button>
+                )}
+              {selected.quarterId !== quarter.id && (
+                <p className="muted">历史回合政策</p>
+              )}
+              {onDiscussAction && (
+                <button
+                  type="button"
+                  disabled={!host && (dirty || saving || saveFailed)}
+                  onClick={() =>
+                    void onDiscussAction(selected.id).catch((cause: unknown) =>
+                      setError(
+                        cause instanceof Error ? cause.message : '讨论打开失败',
+                      ),
+                    )
+                  }
+                >
+                  讨论这份政策
+                </button>
+              )}
+              {host &&
+                onMapReveal &&
+                selected.quarterId === game.currentQuarter.id &&
+                selected.status === 'Approved' &&
+                [
+                  'ActionSubmission',
+                  'Locked',
+                  'HostReview',
+                  'Resolving',
+                ].includes(quarter.state) && (
+                  <button
+                    onClick={() =>
+                      onMapReveal({
+                        actionId: selected.id,
+                        title: selected.title,
+                        countryId: selected.countryId,
+                        tileIds: selected.refs
+                          .filter((ref) => ref.objectType === 'Tile')
+                          .map((ref) => ref.objectId),
+                      })
+                    }
+                  >
+                    设置探索结果
+                  </button>
+                )}
               <p>
                 <span className="tag">{statusNames[selected.status]}</span>
               </p>
@@ -609,9 +1089,28 @@ export function ActionCenter({
                 </p>
               )}
               {(host || !editable) && (
-                <pre className="action-original">
-                  {selected.submittedOriginalText ?? selected.currentText}
-                </pre>
+                <div>
+                  <h5>
+                    {selected.submittedOriginalText === null
+                      ? '行动草稿'
+                      : '最新正式提交内容'}
+                  </h5>
+                  {selected.submissions[0] && (
+                    <p className="muted">
+                      {selected.submissions[0].title} ·{' '}
+                      {categoryName(selected.submissions[0].category)} ·{' '}
+                      {secrecyNames[selected.submissions[0].secrecy]}
+                    </p>
+                  )}
+                  <pre className="action-original">
+                    {selected.submissions[0]?.text ??
+                      selected.submittedOriginalText ??
+                      selected.currentText}
+                  </pre>
+                  {host && !readOnly && requestedSupplement && (
+                    <p className="muted">等待玩家重新提交补充内容。</p>
+                  )}
+                </div>
               )}
               {selected.latestInterpretation && (
                 <div>
@@ -620,29 +1119,31 @@ export function ActionCenter({
                 </div>
               )}
               {!host &&
+                !readOnly &&
                 ['Draft', 'NeedPlayerInput'].includes(selected.status) && (
                   <div className="confirm-action">
-                    {quarter.state !== 'ActionSubmission' ? (
-                      <p className="muted">
-                        等待主持人开放行动提交。草稿仍会自动保存。
-                      </p>
+                    {!canSubmit ? (
+                      <p className="muted">当前未开放提交。</p>
                     ) : !confirmSubmit ? (
                       <button
                         className="button"
                         type="button"
-                        disabled={dirty || saving}
+                        disabled={dirty || saving || saveFailed}
                         onClick={() => setConfirmSubmit(true)}
                       >
-                        {dirty || saving ? '请等待草稿保存完成' : '准备提交'}
+                        {saveFailed
+                          ? '请先解决草稿保存失败'
+                          : dirty || saving
+                            ? '请等待草稿保存完成'
+                            : '准备提交'}
                       </button>
                     ) : (
                       <div className="confirmation-box">
-                        <strong>
-                          请确认：提交表示行动正式交给主持人审核，但不代表行动成功。
-                        </strong>
+                        <strong>提交后交由主持人审核，正文将锁定。</strong>
                         <button
                           className="button"
                           type="button"
+                          disabled={dirty || saving || saveFailed}
                           onClick={() => void perform('submit')}
                         >
                           确认正式提交
@@ -658,6 +1159,9 @@ export function ActionCenter({
                   </div>
                 )}
               {!host &&
+                !readOnly &&
+                selected.quarterId === quarter.id &&
+                quarter.state === 'ActionSubmission' &&
                 [
                   'Submitted',
                   'HostReview',
@@ -671,46 +1175,121 @@ export function ActionCenter({
                     撤回行动
                   </button>
                 )}
-              {host && selected.status !== 'Draft' && (
-                <div className="host-review-form">
-                  <label>
-                    主持人整理稿
-                    <textarea
-                      rows={5}
-                      value={reviewText}
-                      onChange={(event) => setReviewText(event.target.value)}
-                    />
-                  </label>
-                  <button
-                    className="button"
-                    onClick={() => void saveInterpretation()}
-                  >
-                    保存独立整理稿
-                  </button>
-                  <label>
-                    审核说明
-                    <textarea
-                      rows={3}
-                      value={reason}
-                      onChange={(event) => setReason(event.target.value)}
-                    />
-                  </label>
-                  <div className="review-buttons">
-                    <button onClick={() => void decide('request-input')}>
-                      要求补充
+              {host &&
+                !readOnly &&
+                selected.quarterId === quarter.id &&
+                selected.status !== 'Draft' &&
+                ['ActionSubmission', 'Locked', 'HostReview'].includes(
+                  quarter.state,
+                ) && (
+                  <div className="host-review-form">
+                    <label>
+                      主持人整理稿
+                      <textarea
+                        rows={5}
+                        value={reviewText}
+                        onChange={(event) => setReviewText(event.target.value)}
+                      />
+                    </label>
+                    <button
+                      className="button"
+                      onClick={() => void saveInterpretation()}
+                    >
+                      保存独立整理稿
                     </button>
-                    <button onClick={() => void decide('approve')}>批准</button>
-                    <button onClick={() => void decide('reject')}>拒绝</button>
+                    <label>
+                      审核说明
+                      <textarea
+                        rows={3}
+                        value={reason}
+                        onChange={(event) => setReason(event.target.value)}
+                      />
+                    </label>
+                    <div className="review-buttons">
+                      <button
+                        disabled={
+                          !['Submitted', 'HostReview'].includes(selected.status)
+                        }
+                        onClick={() => void decide('request-input')}
+                      >
+                        要求补充
+                      </button>
+                      <button
+                        disabled={
+                          ![
+                            'Submitted',
+                            'HostReview',
+                            'PendingHostApproval',
+                          ].includes(selected.status)
+                        }
+                        onClick={() => void decide('approve')}
+                      >
+                        批准
+                      </button>
+                      <button
+                        disabled={
+                          ![
+                            'Submitted',
+                            'HostReview',
+                            'PendingHostApproval',
+                          ].includes(selected.status)
+                        }
+                        onClick={() => void decide('reject')}
+                      >
+                        拒绝
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
               <details className="version-history">
-                <summary>手动版本（{versions.length}）与状态历史</summary>
+                <summary>
+                  正式提交（{selected.submissions.length}）、手动版本与状态历史
+                </summary>
+                <div className="version-history__section">
+                  <h5>正式提交记录</h5>
+                  {selected.submissions.map((submission, index) => (
+                    <details className="version-entry" key={submission.id}>
+                      <summary>
+                        第 {selected.submissions.length - index} 次提交 ·{' '}
+                        {new Date(submission.submittedAt).toLocaleString(
+                          'zh-CN',
+                        )}
+                      </summary>
+                      <div className="version-entry__content">
+                        <h6>{submission.title}</h6>
+                        <p>
+                          {categoryName(submission.category)} ·{' '}
+                          {secrecyNames[submission.secrecy]}
+                        </p>
+                        <pre className="action-original">{submission.text}</pre>
+                        {submission.refs.length > 0 && (
+                          <ul>
+                            {submission.refs.map((ref) => (
+                              <li
+                                key={`${ref.refKind}-${ref.objectType}-${ref.objectId}`}
+                              >
+                                {ref.label || ref.objectId}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </details>
+                  ))}
+                  {selected.submittedOriginalText !== null && (
+                    <details className="version-entry">
+                      <summary>首次提交原文</summary>
+                      <pre className="action-original">
+                        {selected.submittedOriginalText}
+                      </pre>
+                    </details>
+                  )}
+                  {selected.submissions.length === 0 && (
+                    <p className="muted">暂无提交记录。</p>
+                  )}
+                </div>
                 <div className="version-history__section">
                   <h5>草稿版本</h5>
-                  <p className="muted">
-                    手动版本保存标题、正文、类别和保密级别；自动保存只维护恢复草稿，地图关联沿用当前设置。
-                  </p>
                   <div className="version-list">
                     {versions.map((version, index) => (
                       <details className="version-entry" key={version.version}>

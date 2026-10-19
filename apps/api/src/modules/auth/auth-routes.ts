@@ -8,6 +8,7 @@ import type {
 } from '@srilanka/contracts';
 
 import type { AuthService } from './auth-service.js';
+import { ApiFault } from '../../errors.js';
 
 export const SESSION_COOKIE = 'srilanka_session';
 
@@ -17,7 +18,41 @@ const loginSchema = z.object({
 });
 const registrationSchema = loginSchema.extend({
   displayName: z.string().trim().min(1).max(120),
+  password: z.string().min(15).max(256),
+  inviteCode: z.string().trim().max(128).optional(),
 });
+const passwordSchema = z.object({
+  currentPassword: z.string().min(8).max(256),
+  newPassword: z.string().min(15).max(256),
+});
+const resetSchema = z.object({
+  username: loginSchema.shape.username,
+  code: z.string().trim().min(1).max(128),
+  newPassword: passwordSchema.shape.newPassword,
+});
+const assistanceSchema = z.object({
+  currentPassword: passwordSchema.shape.currentPassword,
+  reason: z.string().trim().min(1).max(500),
+});
+const gameParams = z.object({ gameId: z.uuid() });
+function parsed<T>(schema: z.ZodType<T>, value: unknown): T {
+  const result = schema.safeParse(value);
+  if (!result.success)
+    throw new ApiFault(
+      400,
+      'VALIDATION_FAILED',
+      '请检查填写内容；新密码需15至256个字符。',
+    );
+  return result.data;
+}
+function identifier(body: unknown): string {
+  return typeof body === 'object' &&
+    body !== null &&
+    'username' in body &&
+    typeof body.username === 'string'
+    ? body.username.slice(0, 64)
+    : '';
+}
 
 function setSessionCookie(
   reply: FastifyReply,
@@ -65,7 +100,25 @@ export async function registerAuthRoutes(
   auth: AuthService,
   secureCookies: boolean,
 ): Promise<void> {
-  app.post('/api/v1/auth/register', async (request, reply) => {
+  app.addHook('onRequest', async (request, reply) => {
+    if (
+      request.url.startsWith('/api/v1/auth/') ||
+      /\/(?:password-reset|registration-invitations|account-history)(?:\?|$)/u.test(
+        request.url,
+      )
+    )
+      void reply.header('Cache-Control', 'no-store');
+  });
+  const smallBody = { bodyLimit: 8192 };
+  const respond = (request: FastifyRequest, data: unknown) => ({
+    data,
+    meta: { requestId: request.id },
+  });
+  app.get('/api/v1/auth/options', async (request) =>
+    respond(request, auth.options),
+  );
+  app.post('/api/v1/auth/register', smallBody, async (request, reply) => {
+    await auth.limit('Register', request.ip, identifier(request.body));
     const parsed = registrationSchema.safeParse(request.body);
     if (!parsed.success) {
       return sendApiError(
@@ -73,7 +126,7 @@ export async function registerAuthRoutes(
         reply,
         400,
         'VALIDATION_FAILED',
-        '用户名、显示名称或密码格式不正确。',
+        '请检查用户名和显示名称；新密码需15至256个字符。',
       );
     }
 
@@ -95,7 +148,8 @@ export async function registerAuthRoutes(
     return reply.status(201).send(body);
   });
 
-  app.post('/api/v1/auth/login', async (request, reply) => {
+  app.post('/api/v1/auth/login', smallBody, async (request, reply) => {
+    await auth.limit('Login', request.ip, identifier(request.body));
     const parsed = loginSchema.safeParse(request.body);
     if (!parsed.success) {
       return sendApiError(
@@ -124,6 +178,101 @@ export async function registerAuthRoutes(
       meta: { requestId: request.id },
     };
     return reply.send(body);
+  });
+
+  app.post('/api/v1/auth/password', smallBody, async (request, reply) => {
+    const user = await requireUser(request, reply, auth);
+    if (!user) return;
+    await auth.limit('Reauthenticate', request.ip, user.id);
+    const input = parsed(passwordSchema, request.body);
+    await auth.security.changePassword(
+      user,
+      request.cookies[SESSION_COOKIE]!,
+      input.currentPassword,
+      input.newPassword,
+    );
+    void reply.clearCookie(SESSION_COOKIE, { path: '/api/v1' });
+    return respond(request, { changed: true });
+  });
+  app.post('/api/v1/auth/password-reset', smallBody, async (request, reply) => {
+    await auth.limit('Reset', request.ip, identifier(request.body));
+    const input = parsed(resetSchema, request.body);
+    await auth.security.redeemReset(
+      input.username,
+      input.code,
+      input.newPassword,
+    );
+    void reply.clearCookie(SESSION_COOKIE, { path: '/api/v1' });
+    return respond(request, { changed: true });
+  });
+  app.post(
+    '/api/v1/games/:gameId/members/:memberId/password-reset',
+    smallBody,
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      if (!user) return;
+      await auth.limit('Reauthenticate', request.ip, user.id);
+      await auth.limit('IssueCode', request.ip, user.id);
+      const params = parsed(
+          gameParams.extend({ memberId: z.uuid() }),
+          request.params,
+        ),
+        input = parsed(assistanceSchema, request.body);
+      const data = await auth.security.issueReset(
+        params.gameId,
+        params.memberId,
+        user,
+        request.cookies[SESSION_COOKIE]!,
+        input.currentPassword,
+        input.reason,
+      );
+      return reply.code(201).send(respond(request, data));
+    },
+  );
+  app.post(
+    '/api/v1/games/:gameId/registration-invitations',
+    smallBody,
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      if (!user) return;
+      await auth.limit('Reauthenticate', request.ip, user.id);
+      await auth.limit('IssueCode', request.ip, user.id);
+      const params = parsed(gameParams, request.params),
+        input = parsed(
+          z.object({ currentPassword: passwordSchema.shape.currentPassword }),
+          request.body,
+        );
+      if (auth.options.registrationMode !== 'InviteOnly')
+        throw new ApiFault(
+          409,
+          'INVITATION_NOT_REQUIRED',
+          '当前注册方式不使用邀请码。',
+        );
+      return reply
+        .code(201)
+        .send(
+          respond(
+            request,
+            await auth.security.issueInvitation(
+              params.gameId,
+              user,
+              request.cookies[SESSION_COOKIE]!,
+              input.currentPassword,
+            ),
+          ),
+        );
+    },
+  );
+  app.get('/api/v1/games/:gameId/account-history', async (request, reply) => {
+    const user = await requireUser(request, reply, auth);
+    if (!user) return;
+    return respond(
+      request,
+      await auth.security.history(
+        parsed(gameParams, request.params).gameId,
+        user,
+      ),
+    );
   });
 
   app.post('/api/v1/auth/logout', async (request, reply) => {

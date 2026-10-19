@@ -9,6 +9,18 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./dist/index.js"
+    },
+    "./backup": {
+      "types": "./src/backup.ts",
+      "import": "./dist/backup.js"
+    },
+    "./postgres-tools": {
+      "types": "./src/postgres-tools.ts",
+      "import": "./dist/postgres-tools.js"
+    },
+    "./backup-manager": {
+      "types": "./src/backup-manager.ts",
+      "import": "./dist/backup-manager.js"
     }
   },
   "dependencies": {
@@ -18,6 +30,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "migrate": "tsx src/migrate.ts",
+    "backup": "tsx src/backup-cli.ts",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc --noEmit"
   }
 }

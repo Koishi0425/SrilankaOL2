@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { AuthService } from '../auth/auth-service.js';
 import { requireUser, sendApiError } from '../auth/auth-routes.js';
 import type { WorldService } from './world-service.js';
+import { registerProvinceRoutes } from './province-routes.js';
 
 const gameParams = z.object({ gameId: z.string().uuid() });
 const tileParams = gameParams.extend({ tileId: z.string().uuid() });
@@ -26,25 +27,35 @@ const searchQuery = z.object({
 const previewQuery = z.object({
   previewMemberId: z.string().uuid().optional(),
 });
+const correctionFields = {
+  correctionReason: z.string().trim().min(1).max(2000).optional(),
+  expectedRevision: z.number().int().min(0).optional(),
+};
 const updateTileBody = z
   .object({
+    ...correctionFields,
     terrainTypeId: z.string().uuid().optional(),
     controllerCountryId: z.string().uuid().nullable().optional(),
     notes: z.string().max(2000).optional(),
   })
   .refine((value) => Object.keys(value).length > 0);
 const cityBody = z.object({
+  ...correctionFields,
   tileId: z.string().uuid(),
   name: z.string().trim().min(1).max(120),
   countryId: z.string().uuid().nullable().optional(),
 });
 const armyBody = z.object({
+  ...correctionFields,
   tileId: z.string().uuid(),
   countryId: z.string().uuid(),
   name: z.string().trim().min(1).max(120),
   strength: z.number().int().min(0).max(10_000_000),
 });
-const moveArmyBody = z.object({ tileId: z.string().uuid() });
+const moveArmyBody = z.object({
+  ...correctionFields,
+  tileId: z.string().uuid(),
+});
 
 function parsed<T>(
   request: FastifyRequest,
@@ -75,6 +86,220 @@ export async function registerWorldRoutes(
   auth: AuthService,
   world: WorldService,
 ): Promise<void> {
+  await registerProvinceRoutes(app, auth, world.provinces);
+  app.get('/api/v1/games/:gameId/map/locate', async (request, reply) => {
+    const user = await requireUser(request, reply, auth);
+    if (!user) return reply;
+    const params = parsed(request, reply, gameParams, request.params);
+    const query = parsed(
+      request,
+      reply,
+      previewQuery.extend({
+        objectType: z.enum(['Tile', 'Province']),
+        objectId: z.string().uuid(),
+      }),
+      request.query,
+    );
+    if (!params || !query) return reply;
+    return reply.send(
+      envelope(
+        request,
+        await world.locateReference(
+          params.gameId,
+          user.id,
+          query.objectType,
+          query.objectId,
+          query.previewMemberId,
+        ),
+      ),
+    );
+  });
+  const tileSelection = z
+    .array(z.string().uuid())
+    .min(1)
+    .max(2500)
+    .refine((ids) => new Set(ids).size === ids.length);
+  const revision = z.number().int().min(1);
+  app.get('/api/v1/games/:gameId/map/setup', async (request, reply) => {
+    const user = await requireUser(request, reply, auth);
+    const params = parsed(request, reply, gameParams, request.params);
+    if (!user || !params) return reply;
+    return reply.send(
+      envelope(request, await world.setup.get(params.gameId, user.id)),
+    );
+  });
+  app.post('/api/v1/games/:gameId/map', async (request, reply) => {
+    const user = await requireUser(request, reply, auth);
+    const params = parsed(request, reply, gameParams, request.params);
+    const body = parsed(
+      request,
+      reply,
+      z.object({
+        name: z.string().trim().min(1).max(120),
+        width: z.number().int().min(1).max(100),
+        height: z.number().int().min(1).max(100),
+      }),
+      request.body,
+    );
+    if (!user || !params || !body) return reply;
+    return reply
+      .status(201)
+      .send(
+        envelope(
+          request,
+          await world.setup.create(params.gameId, user.id, body),
+        ),
+      );
+  });
+  app.patch('/api/v1/games/:gameId/map/tiles', async (request, reply) => {
+    const user = await requireUser(request, reply, auth);
+    const params = parsed(request, reply, gameParams, request.params);
+    const body = parsed(
+      request,
+      reply,
+      z
+        .object({
+          expectedRevision: revision,
+          tileIds: tileSelection,
+          correctionReason: correctionFields.correctionReason,
+          terrainTypeId: z.string().uuid().optional(),
+          controllerCountryId: z.string().uuid().nullable().optional(),
+          legalOwnerCountryId: z.string().uuid().nullable().optional(),
+          regionName: z.string().trim().min(1).max(120).optional(),
+          provinceName: z.string().trim().min(1).max(120).optional(),
+        })
+        .refine((value) => !value.provinceName || !!value.regionName)
+        .refine(
+          (value) =>
+            value.terrainTypeId !== undefined ||
+            value.controllerCountryId !== undefined ||
+            value.legalOwnerCountryId !== undefined ||
+            value.regionName !== undefined,
+        ),
+      request.body,
+    );
+    if (!user || !params || !body) return reply;
+    return reply.send(
+      envelope(request, await world.setup.batch(params.gameId, user.id, body)),
+    );
+  });
+  app.post('/api/v1/games/:gameId/map/knowledge', async (request, reply) => {
+    const user = await requireUser(request, reply, auth);
+    const params = parsed(request, reply, gameParams, request.params);
+    const body = parsed(
+      request,
+      reply,
+      z
+        .object({
+          expectedRevision: revision,
+          countryId: z.string().uuid(),
+          tileIds: tileSelection,
+          state: z.enum([
+            'Unknown',
+            'Rumored',
+            'Discovered',
+            'Mapped',
+            'Observed',
+            'Outdated',
+          ]),
+          note: z.string().trim().max(2000),
+          armyErrorPercent: z.number().int().min(0).max(100).optional(),
+          sourceActionId: z.string().uuid().optional(),
+        })
+        .refine(
+          (value) =>
+            value.armyErrorPercent === undefined || value.state === 'Observed',
+        ),
+      request.body,
+    );
+    if (!user || !params || !body) return reply;
+    return reply.send(
+      envelope(
+        request,
+        await world.setup.knowledge(params.gameId, user.id, body),
+      ),
+    );
+  });
+  app.post(
+    '/api/v1/games/:gameId/map/knowledge/initialize',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      const params = parsed(request, reply, gameParams, request.params);
+      const body = parsed(
+        request,
+        reply,
+        z.object({
+          expectedRevision: revision,
+          countryId: z.string().uuid(),
+          mode: z.enum(['OwnTerritory', 'Geography', 'Unknown']),
+        }),
+        request.body,
+      );
+      if (!user || !params || !body) return reply;
+      return reply.send(
+        envelope(
+          request,
+          await world.setup.initializeKnowledge(params.gameId, user.id, body),
+        ),
+      );
+    },
+  );
+  const actionParams = gameParams.extend({ actionId: z.string().uuid() });
+  app.get(
+    '/api/v1/games/:gameId/actions/:actionId/map-reveal',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      const params = parsed(request, reply, actionParams, request.params);
+      if (!user || !params) return reply;
+      return reply.send(
+        envelope(
+          request,
+          await world.setup.plan(params.gameId, user.id, params.actionId),
+        ),
+      );
+    },
+  );
+  app.delete(
+    '/api/v1/games/:gameId/actions/:actionId/map-reveal',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      const params = parsed(request, reply, actionParams, request.params);
+      const body = parsed(
+        request,
+        reply,
+        z.object({ expectedRevision: revision }),
+        request.body,
+      );
+      if (!user || !params || !body) return reply;
+      return reply.send(
+        envelope(
+          request,
+          await world.setup.removePlan(
+            params.gameId,
+            user.id,
+            params.actionId,
+            body.expectedRevision,
+          ),
+        ),
+      );
+    },
+  );
+  app.get('/api/v1/games/:gameId/map/history', async (request, reply) => {
+    const user = await requireUser(request, reply, auth);
+    const params = parsed(request, reply, gameParams, request.params);
+    const query = parsed(request, reply, previewQuery, request.query);
+    if (!user || !params || !query) return reply;
+    return reply.send(
+      envelope(
+        request,
+        await world.setup.history(
+          params.gameId,
+          user.id,
+          query.previewMemberId,
+        ),
+      ),
+    );
+  });
   app.get('/api/v1/games/:gameId/map', async (request, reply) => {
     const user = await requireUser(request, reply, auth);
     if (!user) return reply;
@@ -121,6 +346,34 @@ export async function registerWorldRoutes(
       ),
     );
   });
+
+  app.get(
+    '/api/v1/games/:gameId/tiles/:tileId/context',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      if (!user) return reply;
+      const params = parsed(request, reply, tileParams, request.params);
+      const query = parsed(
+        request,
+        reply,
+        previewQuery.extend({ countryId: z.string().uuid().optional() }),
+        request.query,
+      );
+      if (!params || !query) return reply;
+      return reply.send(
+        envelope(
+          request,
+          await world.getTileContext(
+            params.gameId,
+            user.id,
+            params.tileId,
+            query.previewMemberId,
+            query.countryId,
+          ),
+        ),
+      );
+    },
+  );
 
   app.get(
     '/api/v1/games/:gameId/tiles/:tileId/neighbors',
@@ -233,7 +486,7 @@ export async function registerWorldRoutes(
             gameId: params.gameId,
             userId: user.id,
             armyId: params.armyId,
-            tileId: body.tileId,
+            ...body,
           }),
         ),
       );

@@ -1,20 +1,27 @@
+import { randomBytes, randomUUID } from 'node:crypto';
+import type {
+  AuthOptions,
+  CurrentUser,
+  RegistrationMode,
+  SystemRole,
+} from '@srilanka/contracts';
+import type { DatabaseClient, DatabasePool } from '@srilanka/database';
+import { ApiFault } from '../../errors.js';
 import {
-  createHash,
-  randomBytes,
-  randomUUID,
-  scrypt,
-  timingSafeEqual,
-} from 'node:crypto';
-
-import type { CurrentUser, SystemRole } from '@srilanka/contracts';
-import type { DatabasePool } from '@srilanka/database';
+  hashPassword,
+  hashSecret,
+  verifyPassword,
+  dummyPasswordHash,
+  needsPasswordUpgrade,
+  assertNewPassword,
+  MINIMUM_PASSWORD_LENGTH,
+} from './credentials.js';
+import { authTransaction } from './auth-transaction.js';
+import { limitAuth } from './auth-protection.js';
+import { AccountSecurityService } from './account-security.js';
+export { hashPassword } from './credentials.js';
 
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
-const SCRYPT_KEY_LENGTH = 64;
-const SCRYPT_N = 16_384;
-const SCRYPT_R = 8;
-const SCRYPT_P = 1;
-
 interface UserRow {
   id: string;
   username: string;
@@ -22,60 +29,6 @@ interface UserRow {
   password_hash: string;
   system_role: SystemRole;
 }
-
-function deriveKey(password: string, salt: Buffer): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    scrypt(
-      password,
-      salt,
-      SCRYPT_KEY_LENGTH,
-      { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: 64 * 1024 * 1024 },
-      (error, key) => {
-        if (error) reject(error);
-        else resolve(key);
-      },
-    );
-  });
-}
-
-export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16);
-  const key = await deriveKey(password, salt);
-  return [
-    'scrypt',
-    SCRYPT_N,
-    SCRYPT_R,
-    SCRYPT_P,
-    salt.toString('base64url'),
-    key.toString('base64url'),
-  ].join('$');
-}
-
-async function verifyPassword(
-  password: string,
-  encoded: string,
-): Promise<boolean> {
-  const [algorithm, n, r, p, saltValue, keyValue] = encoded.split('$');
-  if (
-    algorithm !== 'scrypt' ||
-    Number(n) !== SCRYPT_N ||
-    Number(r) !== SCRYPT_R ||
-    Number(p) !== SCRYPT_P ||
-    !saltValue ||
-    !keyValue
-  ) {
-    return false;
-  }
-
-  const expected = Buffer.from(keyValue, 'base64url');
-  const actual = await deriveKey(password, Buffer.from(saltValue, 'base64url'));
-  return expected.length === actual.length && timingSafeEqual(expected, actual);
-}
-
-function hashSessionToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
-}
-
 function toCurrentUser(row: UserRow): CurrentUser {
   return {
     id: row.id,
@@ -84,7 +37,6 @@ function toCurrentUser(row: UserRow): CurrentUser {
     systemRole: row.system_role,
   };
 }
-
 export interface LoginResult {
   token: string;
   expiresAt: Date;
@@ -92,105 +44,141 @@ export interface LoginResult {
 }
 
 export class AuthService {
-  constructor(private readonly database: DatabasePool) {}
-
-  private async createSession(row: UserRow): Promise<LoginResult> {
-    const token = randomBytes(32).toString('base64url');
-    const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
-    await this.database.query(
-      `INSERT INTO auth_sessions (id, user_id, token_hash, expires_at)
-       VALUES ($1, $2, $3, $4)`,
-      [randomUUID(), row.id, hashSessionToken(token), expiresAt],
+  readonly security: AccountSecurityService;
+  readonly options: AuthOptions;
+  constructor(
+    private readonly database: DatabasePool,
+    registrationMode: RegistrationMode = 'Open',
+  ) {
+    this.options = {
+      registrationMode,
+      minimumPasswordLength: MINIMUM_PASSWORD_LENGTH,
+    };
+    this.security = new AccountSecurityService(database);
+  }
+  limit(
+    operation: Parameters<typeof limitAuth>[1],
+    address: string,
+    identifier = '',
+  ) {
+    return limitAuth(this.database, operation, address, identifier);
+  }
+  private async createSession(
+    database: DatabaseClient,
+    row: UserRow,
+  ): Promise<LoginResult> {
+    const token = randomBytes(32).toString('base64url'),
+      expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
+    await database.query(
+      'INSERT INTO auth_sessions (id,user_id,token_hash,expires_at) VALUES ($1,$2,$3,$4)',
+      [randomUUID(), row.id, hashSecret(token), expiresAt],
     );
     return { token, expiresAt, user: toCurrentUser(row) };
   }
-
   async register(input: {
     username: string;
     displayName: string;
     password: string;
+    inviteCode?: string;
   }): Promise<LoginResult | null> {
-    const result = await this.database.query<UserRow>(
-      `INSERT INTO users (id, username, display_name, password_hash)
-       VALUES ($1, LOWER($2), $3, $4)
-       ON CONFLICT ((LOWER(username))) DO NOTHING
-       RETURNING id, username, display_name, password_hash, system_role`,
-      [
-        randomUUID(),
-        input.username.trim(),
-        input.displayName.trim(),
-        await hashPassword(input.password),
-      ],
-    );
-    return result.rows[0] ? this.createSession(result.rows[0]) : null;
+    if (this.options.registrationMode === 'Closed')
+      throw new ApiFault(
+        403,
+        'REGISTRATION_CLOSED',
+        '当前未开放注册，请联系主持人。',
+      );
+    assertNewPassword(input.password);
+    return authTransaction(this.database, async (client) => {
+      const invitation =
+        this.options.registrationMode === 'InviteOnly'
+          ? await this.security.lockInvitation(client, input.inviteCode ?? '')
+          : null;
+      const result = await client.query<UserRow>(
+        `INSERT INTO users (id,username,display_name,password_hash) VALUES ($1,LOWER($2),$3,$4)
+        ON CONFLICT ((LOWER(username))) DO NOTHING RETURNING id,username,display_name,password_hash,system_role`,
+        [
+          randomUUID(),
+          input.username.trim(),
+          input.displayName.trim(),
+          await hashPassword(input.password),
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      if (invitation) {
+        await client.query(
+          'UPDATE registration_invitations SET used_at=NOW(),used_by_user_id=$2 WHERE id=$1',
+          [invitation.id, row.id],
+        );
+        await this.security.record(
+          client,
+          'InviteUsed',
+          invitation.issuer_user_id,
+          row.id,
+          invitation.source_game_id,
+        );
+      }
+      return this.createSession(client, row);
+    });
   }
-
   async login(username: string, password: string): Promise<LoginResult | null> {
-    const result = await this.database.query<UserRow>(
-      `SELECT id, username, display_name, password_hash, system_role
-       FROM users
-       WHERE LOWER(username) = LOWER($1) AND status = 'Active'`,
-      [username.trim()],
-    );
-    const row = result.rows[0];
-    if (!row || !(await verifyPassword(password, row.password_hash)))
-      return null;
-
-    return this.createSession(row);
+    return authTransaction(this.database, async (client) => {
+      const result = await client.query<UserRow>(
+        `SELECT id,username,display_name,password_hash,system_role FROM users WHERE LOWER(username)=LOWER($1) AND status='Active' FOR UPDATE`,
+        [username.trim()],
+      );
+      const row = result.rows[0];
+      if (
+        !(await verifyPassword(
+          password,
+          row?.password_hash ?? (await dummyPasswordHash),
+        )) ||
+        !row
+      )
+        return null;
+      if (needsPasswordUpgrade(row.password_hash))
+        await client.query(
+          'UPDATE users SET password_hash=$2,updated_at=NOW() WHERE id=$1',
+          [row.id, await hashPassword(password)],
+        );
+      return this.createSession(client, row);
+    });
   }
-
   async authenticate(token: string | undefined): Promise<CurrentUser | null> {
     if (!token) return null;
-
     const result = await this.database.query<UserRow>(
-      `SELECT u.id, u.username, u.display_name, u.password_hash, u.system_role
-       FROM auth_sessions s
-       JOIN users u ON u.id = s.user_id
-       WHERE s.token_hash = $1
-         AND s.revoked_at IS NULL
-         AND s.expires_at > NOW()
-         AND u.status = 'Active'`,
-      [hashSessionToken(token)],
+      `SELECT u.id,u.username,u.display_name,u.password_hash,u.system_role FROM auth_sessions s JOIN users u ON u.id=s.user_id
+      WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>NOW() AND u.status='Active'`,
+      [hashSecret(token)],
     );
     return result.rows[0] ? toCurrentUser(result.rows[0]) : null;
   }
-
   async logout(token: string | undefined): Promise<void> {
-    if (!token) return;
-    await this.database.query(
-      `UPDATE auth_sessions SET revoked_at = NOW()
-       WHERE token_hash = $1 AND revoked_at IS NULL`,
-      [hashSessionToken(token)],
-    );
+    if (token)
+      await this.database.query(
+        'UPDATE auth_sessions SET revoked_at=NOW() WHERE token_hash=$1 AND revoked_at IS NULL',
+        [hashSecret(token)],
+      );
   }
-
   async createDevelopmentUser(input: {
     username: string;
     displayName: string;
     password: string;
     systemRole?: SystemRole;
   }): Promise<CurrentUser> {
-    const passwordHash = await hashPassword(input.password);
     const result = await this.database.query<UserRow>(
-      `INSERT INTO users (id, username, display_name, password_hash, system_role)
-       VALUES ($1, LOWER($2), $3, $4, $5)
-       ON CONFLICT ((LOWER(username))) DO UPDATE SET
-         display_name = EXCLUDED.display_name,
-         password_hash = EXCLUDED.password_hash,
-         system_role = EXCLUDED.system_role,
-         status = 'Active',
-         updated_at = NOW()
-       RETURNING id, username, display_name, password_hash, system_role`,
+      `INSERT INTO users (id,username,display_name,password_hash,system_role) VALUES ($1,LOWER($2),$3,$4,$5)
+      ON CONFLICT ((LOWER(username))) DO UPDATE SET display_name=EXCLUDED.display_name,password_hash=EXCLUDED.password_hash,system_role=EXCLUDED.system_role,status='Active',updated_at=NOW()
+      RETURNING id,username,display_name,password_hash,system_role`,
       [
         randomUUID(),
         input.username.trim(),
         input.displayName.trim(),
-        passwordHash,
+        await hashPassword(input.password),
         input.systemRole ?? 'User',
       ],
     );
-    const row = result.rows[0];
-    if (!row) throw new Error('Failed to create development user');
-    return toCurrentUser(row);
+    if (!result.rows[0]) throw new Error('Failed to create development user');
+    return toCurrentUser(result.rows[0]);
   }
 }

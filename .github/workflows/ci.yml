@@ -51,3 +51,6 @@ jobs:
       - run: pnpm build
       - run: pnpm db:migrate
       - run: pnpm --filter @srilanka/api test:integration
+      - run: pnpm --filter @srilanka/database test:integration
+        env:
+          POSTGRES_COMMAND_PREFIX_JSON: '["docker","exec","-i","-e","PGHOST","-e","PGPORT","-e","PGUSER","-e","PGPASSWORD","-e","PGDATABASE","-e","PGCONNECT_TIMEOUT","${{ job.services.postgres.id }}"]'
