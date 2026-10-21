@@ -4,6 +4,25 @@
 
 ## 准备
 
+Docker 部署无需在宿主机安装 PostgreSQL 客户端，API 镜像自带 PostgreSQL 17 的工具，数据与备份保存在独立数据卷。以下 Docker 命令在仓库根目录执行，配置见[部署 README](../../README.md)。
+
+```sh
+docker compose --env-file .env.docker exec api node packages/database/dist/backup-cli.js create
+docker compose --env-file .env.docker exec api node packages/database/dist/backup-cli.js verify --backup /app/backups/BACKUP_ID
+docker compose --env-file .env.docker exec api node packages/database/dist/backup-cli.js restore --backup /app/backups/BACKUP_ID --target-name srilanka_restore_drill
+```
+
+容器路径固定为 `/app/backups`。先在宿主机创建导出目录，再用 `docker compose --env-file .env.docker cp api:/app/backups/. ./backups/docker` 导出完整备份。不要将备份放在网页静态目录。
+
+若从宿主机导入备份，使用新的备份编号目录，确保没有覆盖现有备份，再修正容器内文件所有者：
+
+```sh
+docker compose --env-file .env.docker cp ./backups/docker/BACKUP_ID api:/app/backups/BACKUP_ID
+docker compose --env-file .env.docker exec --user root api chown -R node:node /app/backups/BACKUP_ID
+```
+
+导入后先执行 `verify`，再按上面的 `restore` 恢复到新数据库。恢复完成仍不改变正在使用的库；正式切换前先停止网页、API 和已启用的 worker，修改 `POSTGRES_DB` 为已恢复的数据库名，再重建服务并核对存档。外部导入的源码快照应保留，后续运行代码和迁移应与恢复点对应。
+
 运行环境需要 Node.js 22 以上、项目指定的 pnpm，以及与 PostgreSQL 服务器主版本一致的 `pg_dump` 和 `pg_restore`。默认从 PATH 查找；也可在本机 `.env` 指定 `POSTGRES_BIN_DIR`。数据库运行账号备份时需能读取全部项目表，恢复时另需 CREATEDB 权限。建议恢复演练在维护环境中进行。
 
 命令使用 `.env` 或当前进程的 `DATABASE_URL`。执行前确认数据库名。终端命令以下以 PowerShell 为例，Linux 使用 `pnpm` 代替 `pnpm.cmd`。不要把生产密码写进文档或共享的命令记录。

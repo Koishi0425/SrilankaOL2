@@ -61,11 +61,19 @@ describe('backup safety', () => {
     await writeFile(join(source, '成绩单.pdf'), 'personal');
     await writeFile(join(source, '.env'), 'DATABASE_URL=private');
     await writeFile(join(source, '.env.example'), 'DATABASE_URL=example');
+    await writeFile(join(source, '.env.docker'), 'POSTGRES_PASSWORD=private');
+    await writeFile(
+      join(source, '.env.docker.example'),
+      'POSTGRES_PASSWORD=example',
+    );
+    await writeFile(join(source, 'compose.yaml'), 'services: {}');
     const destination = join(root, 'snapshot');
     const files = await snapshotSource(source, destination);
     expect(files.map((file) => file.path)).toEqual([
+      '.env.docker.example',
       '.env.example',
       'apps/web/new.ts',
+      'compose.yaml',
       'package.json',
       'pnpm-lock.yaml',
     ]);

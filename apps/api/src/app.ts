@@ -35,10 +35,12 @@ export interface AppOptions {
   communications?: CommunicationService;
   assistant?: AssistantService;
   secureCookies?: boolean;
+  trustProxyHops?: number;
 }
 
 export async function buildApp(options: AppOptions) {
   const app = Fastify({
+    trustProxy: options.trustProxyHops || false,
     loggerInstance: createLogger(options.logLevel),
     genReqId: (request) =>
       resolveRequestId(

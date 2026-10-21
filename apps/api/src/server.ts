@@ -93,6 +93,7 @@ async function ensureRedis(): Promise<void> {
 const app = await buildApp({
   logLevel: config.logLevel,
   webOrigin: config.webOrigin,
+  trustProxyHops: config.trustProxyHops,
   auth,
   games,
   settlements,

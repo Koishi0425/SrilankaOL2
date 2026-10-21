@@ -29,6 +29,8 @@ const rootFiles = [
   '.editorconfig',
   '.dockerignore',
   '.env.example',
+  '.env.docker.example',
+  'compose.yaml',
   'README.md',
   'LICENSE',
   'LICENSE.md',

@@ -28,6 +28,7 @@ export interface ServiceConfig {
   databaseUrl: string;
   redisUrl: string;
   webOrigin: string;
+  trustProxyHops: number;
   registrationMode: 'Open' | 'InviteOnly' | 'Closed';
   llm: {
     provider: 'deepseek' | 'glm' | 'compatible';
@@ -55,6 +56,7 @@ const rawConfigSchema = z
     DATABASE_URL: z.string().min(1).optional(),
     REDIS_URL: z.string().min(1).optional(),
     WEB_ORIGIN: z.string().url().default('http://localhost:5173'),
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
     REGISTRATION_MODE: z.enum(['open', 'invite', 'closed']).optional(),
     LLM_PROVIDER: z.enum(['deepseek', 'glm', 'compatible']).default('deepseek'),
     LLM_BASE_URL: z
@@ -113,6 +115,7 @@ export function loadServiceConfig(
     redisUrl:
       parsed.REDIS_URL ?? `redis://localhost:6379/${isTest ? '1' : '0'}`,
     webOrigin: parsed.WEB_ORIGIN,
+    trustProxyHops: parsed.TRUST_PROXY_HOPS,
     registrationMode:
       parsed.REGISTRATION_MODE === 'open'
         ? 'Open'

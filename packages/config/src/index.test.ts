@@ -13,6 +13,12 @@ describe('loadServiceConfig', () => {
   it('rejects invalid ports', () => {
     expect(() => loadServiceConfig({ PORT: '70000' })).toThrow();
   });
+  it('trusts no proxy by default and requires an explicit bounded proxy count', () => {
+    expect(loadServiceConfig({}).trustProxyHops).toBe(0);
+    expect(loadServiceConfig({ TRUST_PROXY_HOPS: '1' }).trustProxyHops).toBe(1);
+    expect(() => loadServiceConfig({ TRUST_PROXY_HOPS: '-1' })).toThrow();
+    expect(() => loadServiceConfig({ TRUST_PROXY_HOPS: 'true' })).toThrow();
+  });
   it('keeps the model service optional and selects provider-specific endpoints', () => {
     expect(loadServiceConfig({}).llm.apiKey).toBe('');
     expect(loadServiceConfig({}).llm.model).toBe('');
