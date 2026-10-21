@@ -7,6 +7,20 @@
 	}
 
 	handle /api/* {
+		# Cloudflare Tunnel connects from the private Compose network and sets
+		# CF-Connecting-IP. Restore the visitor address as the single trusted
+		# X-Forwarded-For value so API rate limits stay per player. Direct
+		# public requests cannot match the private-range condition.
+		@via-cloudflare {
+			remote_ip private_ranges
+			header CF-Connecting-IP *
+		}
+		reverse_proxy @via-cloudflare api:3000 {
+			header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+			transport http {
+				read_timeout 150s
+			}
+		}
 		reverse_proxy api:3000 {
 			transport http {
 				read_timeout 150s

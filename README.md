@@ -32,11 +32,11 @@ Copy-Item .env.docker.example .env.docker
 
 ```sh
 docker compose --env-file .env.docker config --quiet
-docker compose --env-file .env.docker up -d --build --wait --wait-timeout 180
+docker compose --env-file .env.docker up -d --build --wait --wait-timeout 180 --scale cloudflared=0
 docker compose --env-file .env.docker ps -a
 ```
 
-访问 **http://localhost:8080**。首次构建需要下载基础镜像与依赖；`migrate` 容器正常状态为 `Exited (0)`，其余默认服务应为 `healthy`。
+访问 **http://localhost:8080**。首次构建需要下载基础镜像与依赖；`migrate` 容器正常状态为 `Exited (0)`，其余启动的服务应为 `healthy`。本机试玩不启用 Cloudflare Tunnel，所以加 `--scale cloudflared=0` 跳过它；正式隧道部署见第 5 节。
 
 启动会等待 PostgreSQL 就绪，执行全部尚未应用的数据库迁移，迁移成功后才启动 API 和网页。重复启动不会重置存档。数据库、Redis、备份和 HTTPS 证书均使用持久化数据卷；API 和数据库端口不发布到宿主机。
 
@@ -68,29 +68,62 @@ HTTPS_PORT=443
 将 `game.example.com` 替换为自己的域名，再执行启动命令：
 
 ```sh
-docker compose --env-file .env.docker up -d --build --wait --wait-timeout 180
+docker compose --env-file .env.docker up -d --build --wait --wait-timeout 180 --scale cloudflared=0
 ```
 
-网页容器使用 Caddy，自动申请、续期 HTTPS 证书并将 HTTP 重定向到 HTTPS。生产模式登录 Cookie 带有 `Secure`，必须通过 HTTPS 访问。本机 HTTP 试玩保留 `APP_ENV=development`。
+网页容器使用 Caddy，自动申请、续期 HTTPS 证书并将 HTTP 重定向到 HTTPS。生产模式登录 Cookie 带有 `Secure`，必须通过 HTTPS 访问。本机 HTTP 试玩保留 `APP_ENV=development`。第 4 节与第 5 节二选一；使用 Caddy 直接提供 HTTPS 时用 `--scale cloudflared=0` 跳过隧道。
 
 若服务器已有反向代理并占用 80/443，可保留网页仅监听 `127.0.0.1:8080`、`SITE_ADDRESS=:80`，由已有代理转发并提供 HTTPS；`APP_ORIGIN` 仍填写最终 HTTPS 地址，`APP_ENV=production`。API 仅信任 Caddy 这一层代理，Caddy 默认不信任外部伪造的转发头；额外代理的真实来源地址信任应按该代理的固定地址配置。
 
+### 5. 使用 Cloudflare Tunnel 开放公网（可选）
+
+无法开放入站 80/443、或服务器没有公网 IP 时，可以用 Cloudflare Tunnel 发布网页。TLS 在 Cloudflare 边缘终止，Caddy 只在容器网络内提供 HTTP，宿主机端口保持仅监听 `127.0.0.1`。
+
+1. 在 Cloudflare Zero Trust 的 **Networking → Tunnels** 创建 remotely-managed tunnel（选择 Docker 安装方式），复制安装命令中的 token（`eyJ...` 字符串）。
+2. 给隧道添加 Published application：子域名填例如 `game.example.com`，Service URL 填 `http://web:80`。`web` 是 Compose 服务名，cloudflared 与它位于同一网络；不要填 `localhost` 或 `https://`。
+3. 修改 `.env.docker`：
+
+```dotenv
+APP_ENV=production
+APP_ORIGIN=https://game.example.com
+SITE_ADDRESS=:80
+WEB_BIND=127.0.0.1
+HTTP_PORT=8080
+HTTPS_PORT=8443
+CLOUDFLARE_TUNNEL_TOKEN=replace-with-the-tunnel-token
+```
+
+`SITE_ADDRESS` 保持 `:80`，不要写域名，否则 Caddy 会尝试向公网申请证书；`WEB_BIND=127.0.0.1` 确保无法通过服务器 IP 绕过 Cloudflare 直接访问。
+
+4. 填好 token 后直接启动（cloudflared 随默认服务一起启动，不需要额外 profile 参数）：
+
+```sh
+docker compose --env-file .env.docker up -d --build --wait --wait-timeout 180
+docker compose --env-file .env.docker ps -a
+docker compose --env-file .env.docker logs -f cloudflared
+```
+
+如果部署环境把变量放在根目录 `.env`，直接执行 `docker compose up -d` 即可；本仓库文档为区分源码开发环境才显式使用 `--env-file .env.docker`。token 为空时 cloudflared 会因缺少 token 退出，因此本机试玩请按第 2 节加 `--scale cloudflared=0` 跳过。日志出现 `Registered tunnel connection` 后，访问 `https://game.example.com`。健康检查仍可走 `http://localhost:8080/api/v1/health`。
+
+cloudflared 只需出站连接 Cloudflare（默认 QUIC/UDP 7844，失败时回退 HTTP/2），不需要在路由器或云安全组开放入站端口。它与第 4 节的 Caddy 自动 HTTPS 二选一；启用隧道时不要把 `WEB_BIND` 改成 `0.0.0.0`，以免绕过 Cloudflare 的访问控制。API 通过 `CF-Connecting-IP` 还原访客地址，登录和注册限流仍按玩家分别计算。更新、停止和查看日志用常规 Compose 命令即可。
+
 ### 主要配置
 
-| 变量                                         | 作用                                                   |
-| -------------------------------------------- | ------------------------------------------------------ |
-| `POSTGRES_PASSWORD`                          | 数据库密码，首次部署必须替换                           |
-| `POSTGRES_USER` / `POSTGRES_DB`              | 默认 `srilanka`；已有数据卷不会因修改变量而重新初始化  |
-| `APP_ENV`                                    | 本机 HTTP 为 `development`；正式 HTTPS 为 `production` |
-| `APP_ORIGIN`                                 | 浏览器实际访问的协议、主机和端口，不带路径             |
-| `SITE_ADDRESS`                               | `:80` 提供 HTTP；域名启用 Caddy 自动 HTTPS             |
-| `WEB_BIND` / `HTTP_PORT` / `HTTPS_PORT`      | 默认 `127.0.0.1:8080/8443`                             |
-| `REGISTRATION_MODE`                          | `invite` 邀请注册、`closed` 关闭注册、`open` 自由注册  |
-| `BACKUP_ENABLED`                             | 默认 `true`，启用定时备份及发布前恢复点                |
-| `BACKUP_INTERVAL_MINUTES` / `BACKUP_KEEP`    | 默认每 60 分钟备份，保留最近 48 份定时备份             |
-| `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` | 可选模型服务；密钥或模型为空时不启用                   |
-| `LLM_BASE_URL`                               | 自定义兼容 API 的基础地址，可省略以使用供应商默认地址  |
-| `IMAGE_TAG`                                  | 本地构建镜像标签，默认 `local`                         |
+| 变量                                         | 作用                                                                  |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| `POSTGRES_PASSWORD`                          | 数据库密码，首次部署必须替换                                          |
+| `POSTGRES_USER` / `POSTGRES_DB`              | 默认 `srilanka`；已有数据卷不会因修改变量而重新初始化                 |
+| `APP_ENV`                                    | 本机 HTTP 为 `development`；正式 HTTPS 为 `production`                |
+| `APP_ORIGIN`                                 | 浏览器实际访问的协议、主机和端口，不带路径                            |
+| `SITE_ADDRESS`                               | `:80` 提供 HTTP；域名启用 Caddy 自动 HTTPS                            |
+| `WEB_BIND` / `HTTP_PORT` / `HTTPS_PORT`      | 默认 `127.0.0.1:8080/8443`                                            |
+| `REGISTRATION_MODE`                          | `invite` 邀请注册、`closed` 关闭注册、`open` 自由注册                 |
+| `BACKUP_ENABLED`                             | 默认 `true`，启用定时备份及发布前恢复点                               |
+| `BACKUP_INTERVAL_MINUTES` / `BACKUP_KEEP`    | 默认每 60 分钟备份，保留最近 48 份定时备份                            |
+| `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` | 可选模型服务；密钥或模型为空时不启用                                  |
+| `LLM_BASE_URL`                               | 自定义兼容 API 的基础地址，可省略以使用供应商默认地址                 |
+| `CLOUDFLARE_TUNNEL_TOKEN`                    | Cloudflare Tunnel token；本机无隧道时留空并加 `--scale cloudflared=0` |
+| `IMAGE_TAG`                                  | 本地构建镜像标签，默认 `local`                                        |
 
 修改环境变量后使用 `up -d` 重建容器；单独 `restart` 不会更新环境变量。数据库密码初始化后若需更换，需同时修改数据库角色密码与部署配置，不能只改 `.env.docker`。
 
@@ -101,6 +134,8 @@ docker compose --env-file .env.docker up -d --build --wait --wait-timeout 180
                                               ├─ PostgreSQL 17
                                               ├─ Redis 8
                                               └─ 备份数据卷
+
+Cloudflare 边缘 → cloudflared（无公网 IP 时）→ Caddy
 ```
 
 API 使用 Node.js 24，以非 root 用户运行，镜像带 PostgreSQL 17 的备份客户端。基础运行不需要对象存储，当前游戏存档均在 PostgreSQL。
@@ -159,7 +194,7 @@ docker compose --env-file .env.docker build --pull api web
 docker compose --env-file .env.docker up -d --wait --wait-timeout 180
 ```
 
-如启用了 worker，同样停止并重新构建 worker。升级自动应用新的 SQL 迁移，不自动回退数据库；回退时使用对应源码和恢复到新库的备份。
+如启用了 worker，同样停止并重新构建 worker。升级自动应用新的 SQL 迁移，不自动回退数据库；回退时使用对应源码和恢复到新库的备份。cloudflared 随默认服务一起启停，不需要额外参数；未配置隧道时用 `--scale cloudflared=0` 跳过。
 
 ```sh
 # 移除容器，保留持久化数据。

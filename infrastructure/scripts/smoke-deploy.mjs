@@ -113,6 +113,8 @@ try {
     'up',
     '-d',
     ...(build ? ['--build'] : []),
+    '--scale',
+    'cloudflared=0',
     '--wait',
     '--wait-timeout',
     '180',
@@ -240,7 +242,15 @@ try {
   );
 
   compose(['restart', 'database', 'redis', 'api', 'web']);
-  compose(['up', '-d', '--wait', '--wait-timeout', '180']);
+  compose([
+    'up',
+    '-d',
+    '--scale',
+    'cloudflared=0',
+    '--wait',
+    '--wait-timeout',
+    '180',
+  ]);
   const games = (await (await request('/api/v1/games')).json()).data;
   assert.ok(games.some((item) => item.id === game.id));
   exec('web', 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile');

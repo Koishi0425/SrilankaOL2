@@ -137,6 +137,23 @@ services:
         condition: service_healthy
     logging: *logging
 
+  # Public entrypoint for hosts without a public IP: Cloudflare Tunnel reaches
+  # Caddy at http://web:80 over the Compose network. Set
+  # CLOUDFLARE_TUNNEL_TOKEN in your env file; the tunnel's published hostname
+  # must point at http://web:80. For a local-only run without a token, skip
+  # this service with `--scale cloudflared=0`.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command: ['tunnel', '--no-autoupdate', 'run']
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      web:
+        condition: service_healthy
+    logging: *logging
+
   # No background game jobs currently depend on the worker baseline.
   worker:
     profiles: ['worker']
