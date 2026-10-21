@@ -23,7 +23,7 @@ import {
   searchMap,
 } from '../api.js';
 import { HexMap } from './HexMap.js';
-import { axialToPixel, fitMap } from './hex-math.js';
+import { axialToPixel, fitMap, zoomAt } from './hex-math.js';
 
 vi.mock('../api.js', () => ({
   ApiRequestError: class extends Error {},
@@ -175,6 +175,64 @@ async function ready() {
   await waitFor(() => expect(fetchMapViewport).toHaveBeenCalled());
   return screen.getByLabelText('交互地图：方向键平移，加减号缩放，0 查看全图');
 }
+
+it('keeps the whole map fitted during resize until the player zooms, then preserves the viewed location', async () => {
+  let resize!: () => void;
+  let width = 900;
+  let height = 520;
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: () => void) {
+        resize = callback;
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  vi.spyOn(
+    HTMLCanvasElement.prototype,
+    'clientWidth',
+    'get',
+  ).mockImplementation(() => width);
+  vi.spyOn(
+    HTMLCanvasElement.prototype,
+    'clientHeight',
+    'get',
+  ).mockImplementation(() => height);
+  render(<HexMap game={game} countries={[]} overlay showDetails={false} />);
+  const canvas = await ready();
+  width = 650;
+  height = 320;
+  act(() => resize());
+  let view = fitMap(12, 8, width, height, 27, 3);
+  const clickAtView = () => {
+    const p = axialToPixel(origin.q, origin.r, 27);
+    const point = {
+      clientX: view.offsetX + p.x * view.scale,
+      clientY: view.offsetY + p.y * view.scale,
+      button: 0,
+    };
+    fireEvent.pointerDown(canvas, point);
+    fireEvent.pointerUp(canvas, point);
+  };
+  clickAtView();
+  await waitFor(() =>
+    expect(fetchTile).toHaveBeenCalledWith('game', 'origin', undefined),
+  );
+  vi.mocked(fetchTile).mockClear();
+  fireEvent.keyDown(canvas, { key: '+' });
+  view = zoomAt(view, { x: width / 2, y: height / 2 }, 1.25, 0.5, 3);
+  width += 100;
+  height += 60;
+  act(() => resize());
+  view.offsetX += 50;
+  view.offsetY += 30;
+  clickAtView();
+  await waitFor(() =>
+    expect(fetchTile).toHaveBeenCalledWith('game', 'origin', undefined),
+  );
+});
 function point(tile: TileDetails) {
   const view = fitMap(12, 8, 900, 520, 27, 3);
   const p = axialToPixel(tile.q, tile.r, 27);
@@ -319,4 +377,55 @@ it('shows an empty search result and dismisses it with Escape', async () => {
   expect(
     screen.queryByText('没有找到匹配的地点或军队。'),
   ).not.toBeInTheDocument();
+});
+
+it('switches map modes directly while retaining the inspected tile', async () => {
+  render(<HexMap game={game} countries={[]} overlay />);
+  clickTile(await ready(), origin);
+  await screen.findByRole('heading', { name: '北境' });
+  const loads = vi.mocked(fetchTile).mock.calls.length;
+  for (const mode of ['地形', '情报认知', '政治地图']) {
+    fireEvent.click(screen.getByRole('button', { name: mode }));
+    expect(screen.getByRole('button', { name: mode })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('heading', { name: '北境' })).toBeVisible();
+  }
+  expect(fetchTile).toHaveBeenCalledTimes(loads);
+});
+
+it('navigates map search results by keyboard and returns focus to the map after selection', async () => {
+  vi.mocked(searchMap).mockResolvedValue([
+    { id: 'city', type: 'City', name: '河港', tileId: origin.id, q: 1, r: 1 },
+    {
+      id: 'army',
+      type: 'Army',
+      name: '北军',
+      tileId: destination.id,
+      q: 2,
+      r: 1,
+    },
+  ]);
+  render(<HexMap game={game} countries={[]} overlay />);
+  const canvas = await ready();
+  const search = screen.getByRole('searchbox');
+  fireEvent.change(search, { target: { value: '河' } });
+  fireEvent.submit(search.closest('form')!);
+  const first = await screen.findByRole('button', { name: '城市 · 河港' });
+  fireEvent.keyDown(search, { key: 'ArrowDown' });
+  expect(first).toHaveFocus();
+  fireEvent.keyDown(first, { key: 'ArrowDown' });
+  expect(screen.getByRole('button', { name: '军队 · 北军' })).toHaveFocus();
+  fireEvent.keyDown(screen.getByRole('button', { name: '军队 · 北军' }), {
+    key: 'Escape',
+  });
+  expect(search).toHaveFocus();
+  expect(
+    screen.queryByRole('region', { name: '地图搜索结果' }),
+  ).not.toBeInTheDocument();
+  fireEvent.submit(search.closest('form')!);
+  fireEvent.click(await screen.findByRole('button', { name: '城市 · 河港' }));
+  await screen.findByRole('heading', { name: '北境' });
+  expect(canvas).toHaveFocus();
 });

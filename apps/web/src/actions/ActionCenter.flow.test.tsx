@@ -105,6 +105,70 @@ async function openAction() {
 afterEach(cleanup);
 
 describe('policy supplementation and formal submissions', () => {
+  it('keeps a new policy intact when its creation shortcut is clicked again', async () => {
+    render(
+      <ActionCenter
+        game={{
+          ...game,
+          currentQuarter: { ...game.currentQuarter, state: 'ActionSubmission' },
+        }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('行动标题'), {
+      target: { value: '秋季建设' },
+    });
+    fireEvent.change(screen.getByLabelText('政策 / 行动内容'), {
+      target: { value: '修复北境水渠，优先处理损坏的闸门。' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '新建政策 / 行动' }));
+    expect(screen.getByLabelText('行动标题')).toHaveValue('秋季建设');
+    expect(screen.getByLabelText('政策 / 行动内容')).toHaveValue(
+      '修复北境水渠，优先处理损坏的闸门。',
+    );
+    expect(screen.getByLabelText('行动标题')).toHaveFocus();
+    expect(createAction).not.toHaveBeenCalled();
+  });
+  it('finds policies by country and status without replacing the open editor', async () => {
+    vi.mocked(fetchActions).mockResolvedValue([
+      action,
+      {
+        ...action,
+        id: 'second',
+        title: '修复水渠',
+        countryName: '南国',
+        status: 'Approved',
+      },
+    ]);
+    render(<ActionCenter game={game} />);
+    await openAction();
+    fireEvent.change(screen.getByLabelText('政策 / 行动内容'), {
+      target: { value: '投入三十人，保留原计划路线。' },
+    });
+    fireEvent.change(screen.getByLabelText('搜索政策'), {
+      target: { value: '南国' },
+    });
+    expect(
+      screen.queryByRole('button', { name: /北方探索.*康提/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /修复水渠.*南国/ }),
+    ).toBeVisible();
+    fireEvent.change(screen.getByLabelText('筛选政策状态'), {
+      target: { value: 'attention' },
+    });
+    expect(screen.getByText('没有匹配的政策。')).toBeVisible();
+    expect(screen.getByLabelText('政策 / 行动内容')).toHaveValue(
+      '投入三十人，保留原计划路线。',
+    );
+    fireEvent.click(screen.getByRole('button', { name: '显示全部政策' }));
+    expect(
+      screen.getByRole('button', { name: /北方探索.*康提/ }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: /修复水渠.*南国/ }),
+    ).toBeVisible();
+    expect(fetchAction).toHaveBeenCalledOnce();
+  });
   it('retains the creation request across network failures and reload recovery', async () => {
     const current = {
       ...game,

@@ -116,6 +116,8 @@ export function SettlementPanel({
   const [rounds, setRounds] = useState<SettlementSummary[]>([]);
   const [data, setData] = useState<QuarterSettlement | null>(null);
   const [selected, setSelected] = useState('public');
+  const [queueQuery, setQueueQuery] = useState('');
+  const [onlyUnfilled, setOnlyUnfilled] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [correcting, setCorrecting] = useState(false);
@@ -492,6 +494,14 @@ export function SettlementPanel({
     })) ?? [];
   const missingEconomy =
     data?.economyStatus?.status === 'Ready' && !data.economicBill;
+  const queueActions =
+    data?.actions.filter(
+      (item) =>
+        (!onlyUnfilled || !item.feedback.trim()) &&
+        `${item.title} ${item.countryName}`
+          .toLocaleLowerCase()
+          .includes(queueQuery.trim().toLocaleLowerCase()),
+    ) ?? [];
 
   return (
     <section className="work-center settlement-panel">
@@ -642,6 +652,25 @@ export function SettlementPanel({
             )}
             <div className="center-layout">
               <aside className="center-list" aria-label="待结算政策">
+                <div className="queue-tools">
+                  <input
+                    type="search"
+                    aria-label="搜索待结算政策"
+                    placeholder="搜索政策或国家"
+                    value={queueQuery}
+                    onChange={(event) => setQueueQuery(event.target.value)}
+                  />
+                  <label className="queue-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={onlyUnfilled}
+                      onChange={(event) =>
+                        setOnlyUnfilled(event.target.checked)
+                      }
+                    />
+                    只看未填写
+                  </label>
+                </div>
                 {!!data.actions.length && (
                   <div className="settlement-progress">
                     <span>
@@ -675,7 +704,7 @@ export function SettlementPanel({
                 >
                   回合公报
                 </button>
-                {[...new Set(data.actions.map((item) => item.countryId))].map(
+                {[...new Set(queueActions.map((item) => item.countryId))].map(
                   (countryId) => (
                     <Fragment key={countryId}>
                       <strong className="settlement-queue-country">
@@ -685,7 +714,7 @@ export function SettlementPanel({
                           )!.countryName
                         }
                       </strong>
-                      {data.actions
+                      {queueActions
                         .filter((item) => item.countryId === countryId)
                         .map((item) => (
                           <button
@@ -708,6 +737,20 @@ export function SettlementPanel({
                     </Fragment>
                   ),
                 )}
+                {data.actions.length > 0 && queueActions.length === 0 && (
+                  <div className="queue-empty">
+                    <p>没有匹配的政策。</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQueueQuery('');
+                        setOnlyUnfilled(false);
+                      }}
+                    >
+                      显示全部政策
+                    </button>
+                  </div>
+                )}
               </aside>
               <div className="center-detail" ref={detailPane}>
                 {!action ? (
@@ -724,11 +767,29 @@ export function SettlementPanel({
                     />
                   </label>
                 ) : (
-                  <div className="action-editor">
-                    <h4>
-                      {action.countryName} · {action.title}
-                      {action.status === 'Rejected' ? '（已拒绝）' : ''}
-                    </h4>
+                  <div className="action-editor settlement-policy-editor">
+                    <div className="settlement-policy-heading">
+                      <h4>
+                        {action.countryName} · {action.title}
+                        {action.status === 'Rejected' ? '（已拒绝）' : ''}
+                      </h4>
+                      {onDiscussAction && (
+                        <button
+                          onClick={() =>
+                            void onDiscussAction(action.actionId).catch(
+                              (cause: unknown) =>
+                                setError(
+                                  cause instanceof Error
+                                    ? cause.message
+                                    : '讨论打开失败',
+                                ),
+                            )
+                          }
+                        >
+                          讨论这份政策
+                        </button>
+                      )}
+                    </div>
                     <ActionMapLinks
                       refs={action.refs}
                       onLocate={onLocateReference}
@@ -739,80 +800,66 @@ export function SettlementPanel({
                         {action.submittedText}
                       </pre>
                     </details>
-                    {onDiscussAction && (
-                      <button
-                        onClick={() =>
-                          void onDiscussAction(action.actionId).catch(
-                            (cause: unknown) =>
-                              setError(
-                                cause instanceof Error
-                                  ? cause.message
-                                  : '讨论打开失败',
-                              ),
-                          )
-                        }
-                      >
-                        讨论这份政策
-                      </button>
-                    )}
                     {action.reviewReason && (
-                      <p className="rules-text">
+                      <p className="rules-text settlement-review-note">
                         审核意见：{action.reviewReason}
                       </p>
                     )}
-                    {action.status === 'Approved' && onMapReveal && (
-                      <div className="settlement-map-result">
-                        <button
-                          disabled={busy}
-                          onClick={() =>
-                            onMapReveal({
-                              actionId: action.actionId,
-                              title: action.title,
-                              countryId: action.countryId,
-                              tileIds: reveal?.tileIds ?? [],
-                            })
-                          }
-                        >
-                          设置探索结果
-                        </button>
-                        {reveal && (
-                          <p className="rules-text">
-                            将揭示 {reveal.tileIds.length} 个地块（
-                            {discoveryNames[reveal.state]}）
-                            {reveal.note && `：${reveal.note}`}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    <AssistantPanel
-                      key={`assistant:${data.quarter.id}:${action.actionId}`}
-                      gameId={game.id}
-                      input={{
-                        purpose: 'Feedback',
-                        quarterId: data.quarter.id,
-                        actionId: action.actionId,
-                        expectedVersion: data.version,
-                        expectedCorrectionVersion:
-                          data.corrections?.length ?? 0,
-                      }}
-                      contextKey={JSON.stringify([data, action.feedback])}
-                      disabled={busy || dirty}
-                      disabledReason={
-                        dirty
-                          ? '请先保存本回合草稿，确保起草依据与结算计划一致。'
-                          : undefined
-                      }
-                      onAdopt={(feedback) =>
-                        modified({
-                          ...data,
-                          actions: data.actions.map((item) =>
-                            item.actionId === action.actionId
-                              ? { ...item, feedback }
-                              : item,
-                          ),
-                        })
-                      }
-                    />
+                    <div className="settlement-feedback-tools">
+                      {action.status === 'Approved' && onMapReveal && (
+                        <div className="settlement-map-result">
+                          <button
+                            disabled={busy}
+                            onClick={() =>
+                              onMapReveal({
+                                actionId: action.actionId,
+                                title: action.title,
+                                countryId: action.countryId,
+                                tileIds: reveal?.tileIds ?? [],
+                              })
+                            }
+                          >
+                            设置探索结果
+                          </button>
+                          {reveal && (
+                            <p className="rules-text">
+                              将揭示 {reveal.tileIds.length} 个地块（
+                              {discoveryNames[reveal.state]}）
+                              {reveal.note && `：${reveal.note}`}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      <AssistantPanel
+                        key={`assistant:${data.quarter.id}:${action.actionId}`}
+                        gameId={game.id}
+                        input={{
+                          purpose: 'Feedback',
+                          quarterId: data.quarter.id,
+                          actionId: action.actionId,
+                          expectedVersion: data.version,
+                          expectedCorrectionVersion:
+                            data.corrections?.length ?? 0,
+                        }}
+                        contextKey={JSON.stringify([data, action.feedback])}
+                        disabled={busy || dirty}
+                        disabledReason={
+                          dirty
+                            ? '请先保存本回合草稿，确保起草依据与结算计划一致。'
+                            : undefined
+                        }
+                        onAdopt={(feedback) =>
+                          modified({
+                            ...data,
+                            actions: data.actions.map((item) =>
+                              item.actionId === action.actionId
+                                ? { ...item, feedback }
+                                : item,
+                            ),
+                          })
+                        }
+                      />
+                    </div>
                     <label>
                       政策反馈（仅本国与主持人）
                       <textarea

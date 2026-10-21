@@ -5,6 +5,7 @@ import {
   useState,
   useRef,
   useLayoutEffect,
+  type CSSProperties,
 } from 'react';
 import type {
   CountrySummary,
@@ -49,6 +50,7 @@ import {
 import { isGameReadOnly } from '@srilanka/contracts';
 import { GameLifecyclePanel } from './GameLifecyclePanel.js';
 import { AccountManagement } from '../accounts/AccountPanels.js';
+import { WorkspaceSplitHandle } from './WorkspaceSplitHandle.js';
 export function GameWorkspace({
   game,
   onGameChange,
@@ -96,9 +98,9 @@ export function GameWorkspace({
     key: number;
   }>();
   const mapLocationRequest = useRef<AbortController | null>(null);
-  const [mapReturn, setMapReturn] = useState<'actions' | 'settlement' | null>(
-    null,
-  );
+  const [mapReturn, setMapReturn] = useState<
+    'actions' | 'settlement' | 'country' | null
+  >(null);
   useEffect(
     () => () => mapLocationRequest.current?.abort(),
     [game.id, previewMemberId, workspaceTab],
@@ -126,6 +128,7 @@ export function GameWorkspace({
   const [countryEditing, setCountryEditing] = useState(false);
   const [overviewOpen, setOverviewOpen] = useState(false);
   const [panelExpanded, setPanelExpanded] = useState(false);
+  const [panelShare, setPanelShare] = useState(52);
   const navigationRef = useRef<HTMLElement | null>(null);
   const panelContent = useRef<HTMLDivElement>(null);
   const panelHeading = useRef<HTMLHeadingElement>(null);
@@ -622,6 +625,9 @@ export function GameWorkspace({
       >
         <div
           className={`strategy-main${workspaceTab !== 'map' && !previewMemberId ? ' strategy-main--panel' : ''}${panelExpanded || workspaceTab === 'preparation' ? ' strategy-main--expanded' : ''}`}
+          style={
+            { '--workspace-panel-width': `${panelShare}%` } as CSSProperties
+          }
         >
           <div
             className="strategy-map"
@@ -646,11 +652,13 @@ export function GameWorkspace({
                 mapReturn && workspaceTab === 'map' && !previewMemberId
                   ? {
                       label:
-                        mapReturn === 'settlement'
-                          ? canManage
-                            ? '返回结算'
-                            : '返回回合结果'
-                          : '返回政策',
+                        mapReturn === 'country'
+                          ? `返回${{ overview: '国家概况', economy: '经济', diplomacy: '外交', military: '军事', government: '政府' }[countrySection]}`
+                          : mapReturn === 'settlement'
+                            ? canManage
+                              ? '返回结算'
+                              : '返回回合结果'
+                            : '返回政策',
                       onReturn: () => {
                         setWorkspaceTab(mapReturn);
                         setMapReturn(null);
@@ -689,6 +697,15 @@ export function GameWorkspace({
                 </button>
               </div>
             </header>
+            {!panelExpanded &&
+              workspaceTab !== 'preparation' &&
+              workspaceTab !== 'map' &&
+              !previewMemberId && (
+                <WorkspaceSplitHandle
+                  value={panelShare}
+                  onChange={setPanelShare}
+                />
+              )}
             <div
               className="workspace-drawer__content"
               ref={panelContent}
@@ -788,6 +805,7 @@ export function GameWorkspace({
                     }
                     onLocate={(tile) => {
                       setTileFocus({ ...tile, key: Date.now() });
+                      setMapReturn('country');
                       setWorkspaceTab('map');
                     }}
                   />

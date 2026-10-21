@@ -204,7 +204,35 @@ export function ActionCenter({
   const readOnly = isGameReadOnly(game.status);
   const [quarter, setQuarter] = useState<QuarterSummary>(game.currentQuarter);
   const [items, setItems] = useState<ActionSummary[]>([]);
+  const [query, setQuery] = useState('');
+  const [queueFilter, setQueueFilter] = useState('all');
+  const titleInput = useRef<HTMLInputElement>(null);
+  const detailPane = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<ActionDetails | null>(null);
+  useEffect(() => {
+    if (detailPane.current) detailPane.current.scrollTop = 0;
+  }, [selected?.id]);
+  const needsAttention = (item: ActionSummary) =>
+    (host
+      ? ['Submitted', 'HostReview', 'PendingHostApproval']
+      : ['NeedPlayerInput', 'PendingPlayerConfirmation']
+    ).includes(item.status);
+  const visibleItems = items.filter((item) => {
+    const matchesText =
+      `${item.title} ${item.countryName} ${categoryName(item.category)}`
+        .toLocaleLowerCase()
+        .includes(query.trim().toLocaleLowerCase());
+    const matchesStatus =
+      queueFilter === 'all' ||
+      (queueFilter === 'attention' && needsAttention(item)) ||
+      (queueFilter === 'draft' &&
+        ['Draft', 'Withdrawn'].includes(item.status)) ||
+      (queueFilter === 'finished' &&
+        ['Approved', 'Rejected', 'Completed', 'Invalidated'].includes(
+          item.status,
+        ));
+    return matchesText && matchesStatus;
+  });
   const [versions, setVersions] = useState<ActionVersion[]>([]);
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
@@ -803,11 +831,37 @@ export function ActionCenter({
         )}
       <div className="center-layout">
         <aside className="center-list">
+          <div className="queue-tools">
+            <input
+              type="search"
+              aria-label="搜索政策"
+              placeholder={host ? '搜索政策或国家' : '搜索政策'}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <select
+              aria-label="筛选政策状态"
+              value={queueFilter}
+              onChange={(event) => setQueueFilter(event.target.value)}
+            >
+              <option value="all">全部政策 · {items.length}</option>
+              <option value="attention">
+                {host ? '待审核' : '待我处理'} ·{' '}
+                {items.filter(needsAttention).length}
+              </option>
+              {!host && <option value="draft">草稿 / 已撤回</option>}
+              <option value="finished">已处理</option>
+            </select>
+          </div>
           {!host && !readOnly && (
             <button
               className="button"
               type="button"
               onClick={() => {
+                if (!selected) {
+                  titleInput.current?.focus();
+                  return;
+                }
                 activeActionId.current = null;
                 creationId.current = crypto.randomUUID();
                 setSelected(null);
@@ -826,10 +880,11 @@ export function ActionCenter({
               新建政策 / 行动
             </button>
           )}
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <button
               className={selected?.id === item.id ? 'center-list__active' : ''}
               key={item.id}
+              aria-current={selected?.id === item.id ? 'true' : undefined}
               onClick={() => void open(item.id)}
             >
               <strong>{item.title}</strong>
@@ -839,8 +894,22 @@ export function ActionCenter({
             </button>
           ))}
           {items.length === 0 && <p className="muted">暂无行动。</p>}
+          {items.length > 0 && visibleItems.length === 0 && (
+            <div className="queue-empty">
+              <p>没有匹配的政策。</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery('');
+                  setQueueFilter('all');
+                }}
+              >
+                显示全部政策
+              </button>
+            </div>
+          )}
         </aside>
-        <div className="center-detail">
+        <div className="center-detail" ref={detailPane}>
           {!host && local.error && (
             <p role="alert" className="form-error">
               {local.error}
@@ -879,6 +948,7 @@ export function ActionCenter({
                 <label>
                   行动标题
                   <input
+                    ref={titleInput}
                     required
                     maxLength={160}
                     value={title}

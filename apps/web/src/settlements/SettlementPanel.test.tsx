@@ -133,6 +133,65 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('settlement writing and publication', () => {
+  it('filters the queue without losing feedback or excluding hidden policies from the saved settlement', async () => {
+    const initial = {
+      ...draft,
+      actions: [
+        draft.actions[0]!,
+        {
+          ...draft.actions[0]!,
+          actionId: 'second',
+          title: '南方建设',
+          countryName: '南国',
+          countryId: 'south',
+          feedback: '水渠已完工',
+        },
+      ],
+    };
+    vi.mocked(fetchSettlement).mockResolvedValue(initial);
+    vi.mocked(saveSettlement).mockImplementation(async () => ({
+      ...initial,
+      version: 2,
+      actions: initial.actions.map((item) => ({
+        ...item,
+        feedback:
+          item.actionId === 'action' ? '已经确认了新道路' : item.feedback,
+      })),
+    }));
+    render(<SettlementPanel game={game} onQuarterChange={vi.fn()} />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: /北方探索.*康提/ }),
+    );
+    fireEvent.click(screen.getByLabelText('只看未填写'));
+    expect(
+      screen.queryByRole('button', { name: /南方建设.*南国/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('政策反馈（仅本国与主持人）'), {
+      target: { value: '已经确认了新道路' },
+    });
+    expect(screen.getByText('没有匹配的政策。')).toBeVisible();
+    expect(screen.getByLabelText('政策反馈（仅本国与主持人）')).toHaveValue(
+      '已经确认了新道路',
+    );
+    fireEvent.click(screen.getByRole('button', { name: '显示全部政策' }));
+    fireEvent.change(screen.getByLabelText('搜索待结算政策'), {
+      target: { value: '南国' },
+    });
+    expect(
+      screen.getByRole('button', { name: /南方建设.*南国/ }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /北方探索.*康提/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(saveSettlement).toHaveBeenCalled());
+    expect(vi.mocked(saveSettlement).mock.calls[0]![2].results).toEqual(
+      expect.arrayContaining([
+        { actionId: 'action', feedback: '已经确认了新道路' },
+        { actionId: 'second', feedback: '水渠已完工' },
+      ]),
+    );
+  });
   it('recovers only unsaved text on the same server revision, leaving publication explicit', async () => {
     const editor = () => (
       <DraftAccountProvider userId="host">

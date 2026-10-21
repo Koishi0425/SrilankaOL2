@@ -11,10 +11,10 @@
   font-synthesis: none;
   font-size: 14px;
   line-height: 1.5;
-  --text: #202733;
-  --muted: #606b7a;
-  --line: #dce1e7;
-  --accent: #245bb5;
+  --text: #24332f;
+  --muted: #62716b;
+  --line: #dce3df;
+  --accent: #346454;
 }
 
 * {
@@ -64,7 +64,7 @@ summary:focus-visible {
   border-color: var(--accent);
 }
 .button--primary:hover:not(:disabled) {
-  background: #1c4b98;
+  background: #294f43;
 }
 .button--quiet {
   color: var(--muted);
@@ -2032,12 +2032,15 @@ main.app-shell--wide:has(.strategy-workspace) {
 }
 .strategy-map {
   grid-area: 1 / 1;
+  isolation: isolate;
   min-width: 0;
   min-height: 0;
   height: 100%;
 }
 .strategy-main--panel {
-  grid-template-columns: minmax(440px, 48%) minmax(0, 1fr);
+  grid-template-columns:
+    minmax(480px, var(--workspace-panel-width, 52%))
+    minmax(300px, 1fr);
 }
 .strategy-main--panel > .strategy-map {
   grid-column: 2;
@@ -2085,12 +2088,59 @@ main.app-shell--wide:has(.strategy-workspace) {
   order: 3;
 }
 .strategy-map .search-results {
-  z-index: 3;
-  flex-shrink: 0;
-  max-height: 140px;
+  position: absolute;
+  top: 100%;
+  right: 12px;
+  width: min(380px, calc(100% - 24px));
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
   overflow: auto;
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--line);
+  border: 1px solid var(--line);
+  border-radius: 0 0 6px 6px;
+  padding: 6px;
+  background: #fff;
+  box-shadow: 0 6px 18px #24332f1a;
+}
+.strategy-map .search-results button {
+  text-align: left;
+  border-color: transparent;
+  padding: 9px 10px;
+}
+.strategy-map .search-results button:focus-visible {
+  background: #edf4ef;
+  outline-offset: -2px;
+}
+.map-toolbar-region {
+  position: relative;
+  z-index: 4;
+  flex-shrink: 0;
+}
+.map-modes {
+  display: inline-flex;
+  border: 1px solid #c9d3cc;
+  border-radius: 5px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.map-modes button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 6px 10px;
+  min-height: 34px;
+}
+.map-modes button + button {
+  border-left: 1px solid #dce3df;
+}
+.map-modes button[aria-pressed='true'] {
+  color: #214f40;
+  background: #e3ece5;
+  font-weight: 600;
+}
+.map-modes button:focus-visible {
+  outline-offset: -3px;
 }
 .strategy-map .search-results p {
   margin: 4px 0;
@@ -2414,6 +2464,34 @@ main.app-shell--wide:has(.strategy-workspace) {
   flex-direction: column;
   background: #fff;
   border-right: 1px solid #c3cfc7;
+  container-type: inline-size;
+}
+.workspace-split-handle {
+  position: absolute;
+  right: -5px;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  z-index: 8;
+  cursor: col-resize;
+  touch-action: none;
+}
+.workspace-split-handle::after {
+  content: '';
+  display: block;
+  position: absolute;
+  left: 4px;
+  width: 2px;
+  height: 100%;
+  transition: background-color 120ms;
+}
+.workspace-split-handle:hover::after,
+.workspace-split-handle:focus-visible::after {
+  background: var(--accent);
+}
+.workspace-split-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
 }
 .workspace-drawer__heading {
   display: flex;
@@ -2466,7 +2544,7 @@ main.app-shell--wide:has(.strategy-workspace) {
   margin: 0;
 }
 .workspace-drawer .center-layout {
-  grid-template-columns: 170px minmax(0, 1fr);
+  grid-template-columns: 184px minmax(0, 1fr);
   min-height: 320px;
 }
 .workspace-drawer .center-detail {
@@ -2481,6 +2559,58 @@ main.app-shell--wide:has(.strategy-workspace) {
 .workspace-drawer .center-list .center-list__active {
   border-color: #b9cec0;
   background: #edf4ef;
+  box-shadow: inset 3px 0 var(--accent);
+}
+.queue-tools {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  gap: 8px;
+  margin: -10px -10px 0;
+  padding: 10px;
+  background: #f8faf8;
+}
+.queue-tools input[type='search'],
+.queue-tools select {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #cad4ce;
+  border-radius: 4px;
+  background: #fff;
+}
+.queue-tools input[type='search'] {
+  font-size: 13px;
+}
+.queue-tools .queue-checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--muted);
+}
+.queue-tools .queue-checkbox input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.queue-empty {
+  padding: 12px 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.queue-empty button {
+  padding: 5px 7px;
+}
+.queue-tools :focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid #699585;
+  outline-offset: 1px;
 }
 .workspace-drawer .member-management {
   margin: 16px;
@@ -2564,6 +2694,33 @@ main.app-shell--wide:has(.strategy-workspace) {
 }
 .workspace-drawer textarea {
   line-height: 1.75;
+}
+.settlement-policy-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.settlement-policy-heading h4,
+.settlement-policy-editor .settlement-review-note {
+  margin: 0;
+}
+.settlement-policy-heading button {
+  flex-shrink: 0;
+}
+.settlement-feedback-tools {
+  display: flex;
+  align-items: start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settlement-feedback-tools .assistant-panel {
+  margin: 0;
+}
+.settlement-feedback-tools .assistant-panel:has(button[aria-expanded='true']),
+.settlement-feedback-tools .settlement-map-result:has(p) {
+  flex-basis: 100%;
 }
 .strategy-main--expanded .workspace-drawer__content > div {
   max-width: 1120px;
@@ -2719,6 +2876,9 @@ main.app-shell--wide:has(.strategy-workspace) {
   }
 }
 @media (max-width: 1100px) {
+  .workspace-split-handle {
+    display: none;
+  }
   .strategy-main--panel {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2745,6 +2905,25 @@ main.app-shell--wide:has(.strategy-workspace) {
     bottom: 0;
     width: min(300px, 100%);
     box-shadow: -3px 0 12px #25384918;
+  }
+}
+@container (max-width: 560px) {
+  .workspace-drawer .center-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .workspace-drawer .center-list {
+    max-height: 180px;
+    overflow: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .workspace-drawer .queue-tools {
+    grid-template-columns: minmax(0, 1fr) minmax(100px, 0.9fr);
+    align-items: center;
+  }
+  .workspace-drawer .center-list > button {
+    padding: 9px 12px;
   }
 }
 @media (max-width: 600px) {

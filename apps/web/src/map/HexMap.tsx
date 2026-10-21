@@ -117,6 +117,8 @@ export function HexMap({
   showDetails?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const searchResults = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     id: number;
     x: number;
@@ -126,6 +128,7 @@ export function HexMap({
     moved: boolean;
   } | null>(null);
   const fittedMap = useRef('');
+  const autoFit = useRef(true);
   const previousSize = useRef<{ width: number; height: number } | null>(null);
   const searchRequest = useRef(0);
   const mutationPending = useRef(false);
@@ -210,6 +213,7 @@ export function HexMap({
     factor: number,
     point = { x: size.width / 2, y: size.height / 2 },
   ) {
+    autoFit.current = false;
     setView((current) =>
       zoomAt(current, point, factor, minZoom, metadata?.maxZoom ?? 3),
     );
@@ -259,6 +263,9 @@ export function HexMap({
     if (!active || !metadata || !fit) return;
     if (fittedMap.current !== metadata.id) {
       fittedMap.current = metadata.id;
+      autoFit.current = true;
+      setView(fit);
+    } else if (autoFit.current) {
       setView(fit);
     } else if (previousSize.current) {
       const before = previousSize.current;
@@ -712,6 +719,8 @@ export function HexMap({
 
   function focusResult(result: MapSearchResult, selectForEditing = true) {
     if (result.q === null || result.r === null) return;
+    autoFit.current = false;
+    canvasRef.current?.focus({ preventScroll: true });
     const point = axialToPixel(result.q, result.r, HEX_SIZE);
     setView((current) => ({
       ...current,
@@ -817,110 +826,157 @@ export function HexMap({
       className={`map-shell${compact ? ' map-shell--compact' : ''}${overlay ? ' map-shell--overlay' : ''}`}
     >
       {missingMap && !editing && <p className="muted">本局尚未设置地图。</p>}
-      <div className="map-toolbar" hidden={!metadata}>
-        {metadata && (
-          <select
-            aria-label="地图显示"
-            value={layer}
-            onChange={(event) => setLayer(event.target.value as MapMode)}
+      <div className="map-toolbar-region">
+        <div className="map-toolbar" hidden={!metadata}>
+          {metadata && (
+            <div className="map-modes" role="group" aria-label="地图显示">
+              {Object.entries(mapModes).map(([value, name]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-label={name}
+                  title={name}
+                  aria-pressed={layer === value}
+                  onClick={() => setLayer(value as MapMode)}
+                >
+                  {
+                    { political: '政治', terrain: '地形', knowledge: '情报' }[
+                      value as MapMode
+                    ]
+                  }
+                </button>
+              ))}
+            </div>
+          )}
+          {returnTarget && (
+            <button onClick={returnTarget.onReturn}>
+              {returnTarget.label}
+            </button>
+          )}
+          {canEdit && metadata && (
+            <button
+              aria-pressed={editing}
+              onClick={() => {
+                setEditing(!editing);
+                setMovingArmy(null);
+                setDestination(null);
+                onInspectTile?.();
+              }}
+            >
+              {editing ? '收起工具' : preparing ? '布置地图' : '地图工具'}
+            </button>
+          )}
+          {canEdit && !preparing && metadata && (
+            <button
+              aria-pressed={correcting}
+              onClick={() => {
+                setCorrecting(!correcting);
+                setMovingArmy(null);
+                setDestination(null);
+                setCorrectionReason('');
+              }}
+            >
+              {correcting ? '结束更正' : '即时更正'}
+            </button>
+          )}
+          <form
+            className="map-search"
+            onSubmit={(event) => void submitSearch(event)}
           >
-            {Object.entries(mapModes).map(([value, name]) => (
-              <option key={value} value={value}>
-                {name}
-              </option>
-            ))}
-          </select>
-        )}
-        {returnTarget && (
-          <button onClick={returnTarget.onReturn}>{returnTarget.label}</button>
-        )}
-        {canEdit && metadata && (
-          <button
-            aria-pressed={editing}
-            onClick={() => {
-              setEditing(!editing);
-              setMovingArmy(null);
-              setDestination(null);
-              onInspectTile?.();
-            }}
-          >
-            {editing ? '收起工具' : preparing ? '布置地图' : '地图工具'}
-          </button>
-        )}
-        {canEdit && !preparing && metadata && (
-          <button
-            aria-pressed={correcting}
-            onClick={() => {
-              setCorrecting(!correcting);
-              setMovingArmy(null);
-              setDestination(null);
-              setCorrectionReason('');
-            }}
-          >
-            {correcting ? '结束更正' : '即时更正'}
-          </button>
-        )}
-        <form
-          className="map-search"
-          onSubmit={(event) => void submitSearch(event)}
-        >
-          <input
-            aria-label="搜索地图对象"
-            maxLength={120}
-            type="search"
-            value={search}
-            onChange={(event) => {
-              ++searchRequest.current;
-              setSearch(event.target.value);
-              setSearchState('idle');
-              setResults([]);
-            }}
+            <input
+              ref={searchInput}
+              aria-label="搜索地图对象"
+              maxLength={120}
+              type="search"
+              value={search}
+              onChange={(event) => {
+                ++searchRequest.current;
+                setSearch(event.target.value);
+                setSearchState('idle');
+                setResults([]);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' && results.length > 0) {
+                  event.preventDefault();
+                  searchResults.current
+                    ?.querySelector<HTMLButtonElement>('button')
+                    ?.focus();
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  ++searchRequest.current;
+                  setSearchState('idle');
+                  setResults([]);
+                }
+              }}
+              placeholder="搜索城市或军队"
+            />
+            <button
+              className="button"
+              type="submit"
+              disabled={!search.trim() || searchState === 'loading'}
+            >
+              {searchState === 'loading' ? '搜索中…' : '搜索'}
+            </button>
+          </form>
+        </div>
+        {searchState === 'done' && (
+          <div
+            className="search-results"
+            role="region"
+            aria-label="地图搜索结果"
+            ref={searchResults}
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
                 event.preventDefault();
-                ++searchRequest.current;
                 setSearchState('idle');
-                setResults([]);
+                searchInput.current?.focus();
+              }
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                const buttons = [
+                  ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                    'button',
+                  ),
+                ];
+                const current = buttons.indexOf(
+                  document.activeElement as HTMLButtonElement,
+                );
+                event.preventDefault();
+                buttons[
+                  (current +
+                    (event.key === 'ArrowDown' ? 1 : -1) +
+                    buttons.length) %
+                    buttons.length
+                ]?.focus();
               }
             }}
-            placeholder="搜索城市或军队"
-          />
-          <button
-            className="button"
-            type="submit"
-            disabled={!search.trim() || searchState === 'loading'}
           >
-            {searchState === 'loading' ? '搜索中…' : '搜索'}
-          </button>
-        </form>
-      </div>
-      {searchState === 'done' && (
-        <div className="search-results" aria-label="地图搜索结果">
-          {results.length === 0 && (
-            <p role="status">没有找到匹配的地点或军队。</p>
-          )}
-          {results.map((result) => (
+            {results.length === 0 && (
+              <p role="status">没有找到匹配的地点或军队。</p>
+            )}
+            {results.map((result) => (
+              <button
+                type="button"
+                key={`${result.type}-${result.id}`}
+                onClick={() => focusResult(result)}
+              >
+                {
+                  { City: '城市', Army: '军队', Region: '地区', Tile: '地块' }[
+                    result.type
+                  ]
+                }{' '}
+                · {result.name}
+              </button>
+            ))}
             <button
-              type="button"
-              key={`${result.type}-${result.id}`}
-              onClick={() => focusResult(result)}
+              aria-label="关闭搜索结果"
+              onClick={() => setSearchState('idle')}
             >
-              {
-                { City: '城市', Army: '军队', Region: '地区', Tile: '地块' }[
-                  result.type
-                ]
-              }{' '}
-              · {result.name}
+              关闭
             </button>
-          ))}
-          <button
-            aria-label="关闭搜索结果"
-            onClick={() => setSearchState('idle')}
-          >
-            关闭
-          </button>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
       {error && (
         <p className="form-error" role="alert">
           {error}{' '}
@@ -1041,6 +1097,7 @@ export function HexMap({
                 zoom(0.8);
               } else if (event.key === '0' && fit) {
                 event.preventDefault();
+                autoFit.current = true;
                 setView(fit);
               } else if (
                 ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(
@@ -1048,6 +1105,7 @@ export function HexMap({
                 )
               ) {
                 event.preventDefault();
+                autoFit.current = false;
                 setView((current) => ({
                   ...current,
                   offsetX:
@@ -1111,6 +1169,7 @@ export function HexMap({
               const dx = event.clientX - drag.x;
               const dy = event.clientY - drag.y;
               drag.moved = true;
+              autoFit.current = false;
               setDragging(true);
               setHovered(null);
               drag.x = event.clientX;
@@ -1177,7 +1236,15 @@ export function HexMap({
               >
                 −
               </button>
-              <button title="查看全图（0）" onClick={() => fit && setView(fit)}>
+              <button
+                title="查看全图（0）"
+                onClick={() => {
+                  if (fit) {
+                    autoFit.current = true;
+                    setView(fit);
+                  }
+                }}
+              >
                 全图
               </button>
               <button

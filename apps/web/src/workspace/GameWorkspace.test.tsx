@@ -28,6 +28,7 @@ import {
   openPolicyConversation,
   locateMapReference,
   assignCountry,
+  fetchProvinces,
 } from '../api.js';
 import { GameWorkspace } from './GameWorkspace.js';
 vi.mock('../api.js', async (importOriginal) => ({
@@ -45,6 +46,7 @@ vi.mock('../api.js', async (importOriginal) => ({
   openPolicyConversation: vi.fn(),
   locateMapReference: vi.fn(),
   assignCountry: vi.fn(),
+  fetchProvinces: vi.fn(),
 }));
 vi.mock('../map/HexMap.js', () => ({
   HexMap: ({
@@ -187,6 +189,11 @@ const action: ActionDetails = {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(fetchCountries).mockResolvedValue([country]);
+  vi.mocked(fetchProvinces).mockResolvedValue({
+    canEdit: false,
+    mapRevision: 8,
+    provinces: [],
+  });
   vi.mocked(fetchGameRules).mockResolvedValue(structuredClone(rules));
   vi.mocked(fetchMembers).mockResolvedValue([
     {
@@ -257,6 +264,65 @@ it('sends an explicit null when the host selects unassigned country', async () =
 });
 const nav = () =>
   within(screen.getByRole('navigation', { name: '游戏工作区' }));
+it('retains the chosen panel width across menus and restores it after expanded reading', async () => {
+  render(<GameWorkspace game={game} />);
+  await screen.findByRole('navigation', { name: '游戏工作区' });
+  await nav().findByRole('button', { name: '政策' });
+  fireEvent.click(nav().getByRole('button', { name: '政策' }));
+  const splitter = screen.getByRole('separator', {
+    name: '调整面板与地图宽度',
+  });
+  fireEvent.keyDown(splitter, { key: 'ArrowRight', shiftKey: true });
+  expect(splitter).toHaveAttribute('aria-valuenow', '57');
+  expect(splitter.closest('.strategy-main')).toHaveStyle(
+    '--workspace-panel-width: 57%',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '展开面板' }));
+  expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '还原面板' }));
+  fireEvent.click(nav().getByRole('button', { name: /^消息/ }));
+  expect(screen.getByRole('separator')).toHaveAttribute('aria-valuenow', '57');
+  fireEvent.keyDown(screen.getByRole('separator'), { key: 'Home' });
+  expect(screen.getByRole('separator')).toHaveAttribute('aria-valuenow', '52');
+});
+it('returns from a province on the map to the same economy section and province selection', async () => {
+  vi.mocked(fetchProvinces).mockResolvedValue({
+    canEdit: false,
+    mapRevision: 8,
+    provinces: [
+      {
+        id: 'province',
+        name: '北境',
+        partial: false,
+        tileCount: 1,
+        values: null,
+        legalOwners: [
+          { countryId: 'north', countryName: '北国', tileCount: 1 },
+        ],
+        controllers: [
+          { countryId: 'north', countryName: '北国', tileCount: 1 },
+        ],
+        tiles: [{ id: 'north-bank', q: 9, r: 6, regionName: '北岸' }],
+      },
+    ],
+  });
+  render(<GameWorkspace game={game} />);
+  await screen.findByRole('navigation', { name: '游戏工作区' });
+  fireEvent.click(nav().getByRole('button', { name: '经济' }));
+  fireEvent.click(
+    await screen.findByRole('button', { name: '查看省份：北境' }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '在地图查看地区：北岸' }));
+  expect(await screen.findByText('已定位 north-bank（9,6）')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '返回经济' }));
+  expect(nav().getByRole('button', { name: '经济' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  expect(
+    screen.getByRole('button', { name: '在地图查看地区：北岸' }),
+  ).toBeVisible();
+});
 it('locates a province from a reviewed policy and returns to the same policy without refilling its form', async () => {
   const ref = {
     id: 'ref',
