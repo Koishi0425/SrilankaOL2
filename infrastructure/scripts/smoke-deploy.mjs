@@ -99,7 +99,9 @@ async function request(path, init = {}) {
   return globalThis.fetch(origin + path, {
     ...init,
     signal: globalThis.AbortSignal.timeout(15_000),
-    headers: { origin, cookie, ...init.headers },
+    // Synchronous Docker restarts block socket-close events in this process.
+    // Use fresh HTTP connections so the restart probe cannot reuse a stale one.
+    headers: { connection: 'close', origin, cookie, ...init.headers },
   });
 }
 const jsonBody = (value) => ({
