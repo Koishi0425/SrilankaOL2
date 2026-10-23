@@ -406,8 +406,13 @@ it('keeps map selection and uncreated policy text through menus and Escape; map 
   await screen.findByRole('navigation', { name: '游戏工作区' });
   await nav().findByRole('button', { name: '政策' });
   fireEvent.click(screen.getByRole('button', { name: '将测试地块加入政策' }));
-  await screen.findByLabelText('具体政策');
-  fireEvent.change(screen.getByLabelText('具体政策'), {
+  // Wait for the map target to append its own section after the policy loads.
+  // The pre-existing section can render first, so a global label query races it.
+  const title = await screen.findByDisplayValue('关于东岸堡的政策 / 行动');
+  const mapSection = within(title.closest('article')!);
+  expect(screen.getAllByLabelText('具体政策')).toHaveLength(2);
+  expect(screen.getByDisplayValue('指定探索路线')).toBeInTheDocument();
+  fireEvent.change(mapSection.getByLabelText('具体政策'), {
     target: { value: '携带补给，自由探索东岸堡' },
   });
   fireEvent.click(nav().getByRole('button', { name: /^消息/ }));
@@ -415,7 +420,7 @@ it('keeps map selection and uncreated policy text through menus and Escape; map 
     target: { value: '向主持人说明意图' },
   });
   fireEvent.click(nav().getByRole('button', { name: '政策' }));
-  expect(screen.getByLabelText('具体政策')).toHaveValue(
+  expect(mapSection.getByLabelText('具体政策')).toHaveValue(
     '携带补给，自由探索东岸堡',
   );
   fireEvent.keyDown(window, { key: 'Escape' });
@@ -425,7 +430,7 @@ it('keeps map selection and uncreated policy text through menus and Escape; map 
   expect(screen.getByText('地图保留东岸堡选中状态')).toBeVisible();
   expect(nav().getByRole('button', { name: '政策' })).toHaveFocus();
   fireEvent.click(nav().getByRole('button', { name: '政策' }));
-  expect(screen.getByLabelText('具体政策')).toHaveValue(
+  expect(mapSection.getByLabelText('具体政策')).toHaveValue(
     '携带补给，自由探索东岸堡',
   );
   fireEvent.click(screen.getByRole('button', { name: '查看地图地块' }));
