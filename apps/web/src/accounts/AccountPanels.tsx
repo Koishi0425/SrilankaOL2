@@ -5,6 +5,7 @@ import type {
   AccountSecurityEvent,
   GameMemberSummary,
 } from '@srilanka/contracts';
+import { MINIMUM_PASSWORD_LENGTH } from '@srilanka/contracts';
 import {
   fetchAuthOptions,
   login,
@@ -130,10 +131,12 @@ export function LoginPanel({
             </label>
           )}
           <label>
-            {mode === 'login' ? '密码' : '新密码（至少15个字符）'}
+            {mode === 'login'
+              ? '密码'
+              : `新密码（至少${MINIMUM_PASSWORD_LENGTH}个字符）`}
             <input
               required
-              minLength={mode === 'login' ? 8 : 15}
+              minLength={MINIMUM_PASSWORD_LENGTH}
               maxLength={256}
               type="password"
               autoComplete={
@@ -148,7 +151,7 @@ export function LoginPanel({
               再次填写新密码
               <input
                 required
-                minLength={15}
+                minLength={MINIMUM_PASSWORD_LENGTH}
                 maxLength={256}
                 type="password"
                 autoComplete="new-password"
@@ -281,19 +284,19 @@ export function PasswordPanel({
               required
               type="password"
               autoComplete="current-password"
-              minLength={8}
+              minLength={MINIMUM_PASSWORD_LENGTH}
               maxLength={256}
               value={current}
               onChange={(event) => setCurrent(event.target.value)}
             />
           </label>
           <label>
-            新密码（至少15个字符）
+            新密码（至少{MINIMUM_PASSWORD_LENGTH}个字符）
             <input
               required
               type="password"
               autoComplete="new-password"
-              minLength={15}
+              minLength={MINIMUM_PASSWORD_LENGTH}
               maxLength={256}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -305,7 +308,7 @@ export function PasswordPanel({
               required
               type="password"
               autoComplete="new-password"
-              minLength={15}
+              minLength={MINIMUM_PASSWORD_LENGTH}
               maxLength={256}
               value={confirmation}
               onChange={(event) => setConfirmation(event.target.value)}
@@ -444,7 +447,7 @@ function AssistanceForm({
                 required
                 type="password"
                 autoComplete="current-password"
-                minLength={8}
+                minLength={MINIMUM_PASSWORD_LENGTH}
                 maxLength={256}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}

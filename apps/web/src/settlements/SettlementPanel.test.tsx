@@ -133,6 +133,54 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('settlement writing and publication', () => {
+  it('recovers and saves selected result recipients with the feedback', async () => {
+    vi.mocked(fetchSettlement).mockResolvedValue({
+      ...draft,
+      resultCountries: [
+        { id: 'country', name: '康提' },
+        { id: 'coast', name: '海岸' },
+      ],
+    });
+    vi.mocked(saveSettlement).mockResolvedValue({ ...draft, version: 2 });
+    const editor = () => (
+      <DraftAccountProvider userId="host">
+        <SettlementPanel game={game} onQuarterChange={vi.fn()} />
+      </DraftAccountProvider>
+    );
+    const page = render(editor());
+    fireEvent.click(
+      await screen.findByRole('button', { name: /北方探索.*康提/ }),
+    );
+    expect(screen.getByLabelText('可见范围')).toHaveValue('OwnerOnly');
+    fireEvent.change(screen.getByLabelText('可见范围'), {
+      target: { value: 'Countries' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: '海岸' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '康提' }));
+    fireEvent.change(screen.getByLabelText('政策结算反馈'), {
+      target: { value: '海岸方面发现了探险队。' },
+    });
+    page.unmount();
+    render(editor());
+    fireEvent.click(await screen.findByText('继续编写本地稿'));
+    fireEvent.click(screen.getByRole('button', { name: /北方探索.*康提/ }));
+    expect(screen.getByLabelText('可见范围')).toHaveValue('Countries');
+    expect(screen.getByRole('checkbox', { name: '海岸' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '康提' })).not.toBeChecked();
+    expect(screen.getByLabelText('政策结算反馈')).toHaveValue(
+      '海岸方面发现了探险队。',
+    );
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(saveSettlement).toHaveBeenCalled());
+    expect(vi.mocked(saveSettlement).mock.calls[0]![2].results).toEqual([
+      {
+        actionId: 'action',
+        feedback: '海岸方面发现了探险队。',
+        resultAudience: { kind: 'Countries', countryIds: ['coast'] },
+      },
+    ]);
+    expect(publishSettlement).not.toHaveBeenCalled();
+  });
   it('filters the queue without losing feedback or excluding hidden policies from the saved settlement', async () => {
     const initial = {
       ...draft,
@@ -166,11 +214,11 @@ describe('settlement writing and publication', () => {
     expect(
       screen.queryByRole('button', { name: /南方建设.*南国/ }),
     ).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('政策反馈（仅本国与主持人）'), {
+    fireEvent.change(screen.getByLabelText('政策结算反馈'), {
       target: { value: '已经确认了新道路' },
     });
     expect(screen.getByText('没有匹配的政策。')).toBeVisible();
-    expect(screen.getByLabelText('政策反馈（仅本国与主持人）')).toHaveValue(
+    expect(screen.getByLabelText('政策结算反馈')).toHaveValue(
       '已经确认了新道路',
     );
     fireEvent.click(screen.getByRole('button', { name: '显示全部政策' }));
@@ -250,16 +298,16 @@ describe('settlement writing and publication', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: '下一项待填写' }),
     );
-    fireEvent.change(screen.getByLabelText('政策反馈（仅本国与主持人）'), {
+    fireEvent.change(screen.getByLabelText('政策结算反馈'), {
       target: { value: '北境探明了新水道' },
     });
     fireEvent.click(screen.getByRole('button', { name: '下一项待填写' }));
     expect(
       screen.getByRole('heading', { name: '康提 · 南方建设' }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText('政策反馈（仅本国与主持人）')).toHaveValue('');
+    expect(screen.getByLabelText('政策结算反馈')).toHaveValue('');
     fireEvent.click(screen.getByRole('button', { name: /北方探索.*已填写/ }));
-    expect(screen.getByLabelText('政策反馈（仅本国与主持人）')).toHaveValue(
+    expect(screen.getByLabelText('政策结算反馈')).toHaveValue(
       '北境探明了新水道',
     );
     expect(saveSettlement).not.toHaveBeenCalled();
@@ -297,7 +345,7 @@ describe('settlement writing and publication', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: /北方探索.*康提/ }),
     );
-    fireEvent.change(screen.getByLabelText('政策反馈（仅本国与主持人）'), {
+    fireEvent.change(screen.getByLabelText('政策结算反馈'), {
       target: { value: '尚在编写的反馈' },
     });
     view.rerender(
@@ -309,9 +357,7 @@ describe('settlement writing and publication', () => {
         }}
       />,
     );
-    expect(screen.getByLabelText('政策反馈（仅本国与主持人）')).toHaveValue(
-      '尚在编写的反馈',
-    );
+    expect(screen.getByLabelText('政策结算反馈')).toHaveValue('尚在编写的反馈');
     expect(fetchSettlement).toHaveBeenCalledOnce();
   });
 
@@ -355,7 +401,7 @@ describe('settlement writing and publication', () => {
     const { rerender } = render(<SettlementPanel {...props} active />);
     await screen.findByLabelText('生产基础调整后');
     expect(screen.getByLabelText('省份')).toHaveValue('province');
-    fireEvent.change(screen.getByLabelText('政策反馈（仅本国与主持人）'), {
+    fireEvent.change(screen.getByLabelText('政策结算反馈'), {
       target: { value: '水渠已修复' },
     });
     fireEvent.change(screen.getByLabelText('生产基础调整后'), {
@@ -365,9 +411,7 @@ describe('settlement writing and publication', () => {
     expect(locate).toHaveBeenCalledWith(ref);
     rerender(<SettlementPanel {...props} active={false} />);
     rerender(<SettlementPanel {...props} active />);
-    expect(screen.getByLabelText('政策反馈（仅本国与主持人）')).toHaveValue(
-      '水渠已修复',
-    );
+    expect(screen.getByLabelText('政策结算反馈')).toHaveValue('水渠已修复');
     expect(screen.getByLabelText('生产基础调整后')).toHaveValue(9);
   });
   it('lets a player locate the province from published feedback without exposing host editing controls', async () => {
@@ -676,7 +720,7 @@ describe('settlement writing and publication', () => {
       expect(screen.getByRole('button', { name: /北方探索/ })).toBeEnabled(),
     );
     fireEvent.click(screen.getByRole('button', { name: /北方探索/ }));
-    fireEvent.change(screen.getByLabelText('政策反馈（仅本国与主持人）'), {
+    fireEvent.change(screen.getByLabelText('政策结算反馈'), {
       target: { value: '保留最新反馈' },
     });
     fireEvent.click(screen.getByText('每季经济账单'));
@@ -684,14 +728,10 @@ describe('settlement writing and publication', () => {
       await screen.findByRole('button', { name: '生成本季账单' }),
     );
     expect(await screen.findByRole('alert')).toHaveTextContent('账单读取失败');
-    expect(screen.getByLabelText('政策反馈（仅本国与主持人）')).toHaveValue(
-      '保留最新反馈',
-    );
+    expect(screen.getByLabelText('政策结算反馈')).toHaveValue('保留最新反馈');
     fireEvent.click(screen.getByRole('button', { name: '生成本季账单' }));
     await screen.findByText('每季经济账单（已生成）');
-    expect(screen.getByLabelText('政策反馈（仅本国与主持人）')).toHaveValue(
-      '保留最新反馈',
-    );
+    expect(screen.getByLabelText('政策结算反馈')).toHaveValue('保留最新反馈');
     fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '发布本回合' })).toBeEnabled(),
@@ -825,14 +865,12 @@ describe('settlement writing and publication', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '添加收支' }));
     fireEvent.click(screen.getByText('北方探索'));
-    fireEvent.change(screen.getByLabelText('政策反馈（仅本国与主持人）'), {
+    fireEvent.change(screen.getByLabelText('政策结算反馈'), {
       target: { value: '建设完成' },
     });
     fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('连接中断');
-    expect(screen.getByLabelText('政策反馈（仅本国与主持人）')).toHaveValue(
-      '建设完成',
-    );
+    expect(screen.getByLabelText('政策结算反馈')).toHaveValue('建设完成');
     expect(
       vi.mocked(saveSettlement).mock.lastCall![2].resourceChanges?.[0],
     ).toMatchObject({
@@ -877,7 +915,7 @@ describe('settlement writing and publication', () => {
     });
     render(<SettlementPanel game={game} onQuarterChange={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: /北方探索/ }));
-    fireEvent.change(screen.getByLabelText('政策反馈（仅本国与主持人）'), {
+    fireEvent.change(screen.getByLabelText('政策结算反馈'), {
       target: { value: '军队渡河交战。' },
     });
     fireEvent.click(screen.getByText('战斗'));
@@ -955,9 +993,7 @@ describe('settlement writing and publication', () => {
     expect(
       vi.mocked(saveSettlement).mock.calls[0]![2].battles![0],
     ).not.toHaveProperty('rolls');
-    expect(screen.getByLabelText('政策反馈（仅本国与主持人）')).toHaveValue(
-      '军队渡河交战。',
-    );
+    expect(screen.getByLabelText('政策结算反馈')).toHaveValue('军队渡河交战。');
     const first = vi.mocked(rollSettlementBattle).mock.calls[0]![3];
     expect(first).toMatchObject({
       expectedVersion: 2,
@@ -1045,7 +1081,7 @@ describe('settlement writing and publication', () => {
     render(<SettlementPanel game={game} onQuarterChange={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: /北方探索/ }));
     expect(fetchSettlementStateOptions).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('政策反馈（仅本国与主持人）'), {
+    fireEvent.change(screen.getByLabelText('政策结算反馈'), {
       target: { value: '军队损失二百八十人。' },
     });
     fireEvent.click(screen.getByText('状态变化'));
@@ -1070,7 +1106,7 @@ describe('settlement writing and publication', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
     await screen.findByRole('alert');
-    expect(screen.getByLabelText('政策反馈（仅本国与主持人）')).toHaveValue(
+    expect(screen.getByLabelText('政策结算反馈')).toHaveValue(
       '军队损失二百八十人。',
     );
     expect(screen.getByText('北军：兵力 1000 → 720')).toBeInTheDocument();
@@ -1295,7 +1331,7 @@ describe('settlement writing and publication', () => {
       target: { value: '诸国整备。' },
     });
     fireEvent.click(screen.getByRole('button', { name: /北方探索/ }));
-    fireEvent.change(screen.getByLabelText('政策反馈（仅本国与主持人）'), {
+    fireEvent.change(screen.getByLabelText('政策结算反馈'), {
       target: { value: '发现铜矿。' },
     });
     expect(screen.getByRole('button', { name: '发布本回合' })).toBeDisabled();
@@ -1304,9 +1340,7 @@ describe('settlement writing and publication', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
     await screen.findByRole('alert');
-    expect(screen.getByLabelText('政策反馈（仅本国与主持人）')).toHaveValue(
-      '发现铜矿。',
-    );
+    expect(screen.getByLabelText('政策结算反馈')).toHaveValue('发现铜矿。');
     expect(screen.getByRole('button', { name: '发布本回合' })).toBeDisabled();
     const saved = {
       ...draft,

@@ -25,7 +25,8 @@ import {
   openPolicyConversation,
   locateMapReference,
 } from '../api.js';
-import { ActionCenter, type ActionDraftSeed } from '../actions/ActionCenter.js';
+import { type ActionDraftSeed } from '../actions/ActionCenter.js';
+import { RoundPolicyCenter } from '../actions/RoundPolicyCenter.js';
 import { HexMap } from '../map/HexMap.js';
 import { mapActionSeed, type MapActionIntent } from '../map/map-actions.js';
 import type { MapActionReference } from '../map/ActionMapLinks.js';
@@ -735,7 +736,7 @@ export function GameWorkspace({
               )}
               {actionsOpened && (
                 <div hidden={workspaceTab !== 'actions'}>
-                  <ActionCenter
+                  <RoundPolicyCenter
                     game={{ ...game, currentQuarter }}
                     active={
                       !loading && workspaceTab === 'actions' && !previewMemberId

@@ -140,7 +140,7 @@ try {
   const user = {
     username: 'docker-host',
     displayName: '部署演练主持人',
-    password: randomBytes(24).toString('base64url'),
+    password: randomBytes(3).toString('hex'),
   };
   const bootstrap = [
     'exec',

@@ -211,6 +211,15 @@ const saveSchema = versionSchema.extend({
       z.object({
         actionId: z.string().uuid(),
         feedback: z.string().max(20_000),
+        resultAudience: z
+          .union([
+            z.object({ kind: z.enum(['OwnerOnly', 'Public', 'HostOnly']) }),
+            z.object({
+              kind: z.literal('Countries'),
+              countryIds: z.array(z.uuid()).min(1).max(500),
+            }),
+          ])
+          .optional(),
       }),
     )
     .max(1000),

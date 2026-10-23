@@ -88,6 +88,35 @@ const report: QuarterSettlement = {
 };
 afterEach(cleanup);
 
+it('shows shared feedback without offering the original policy or its discussion', () => {
+  render(
+    <SettlementReport
+      data={{
+        ...report,
+        actions: [
+          {
+            ...report.actions[0]!,
+            title: '政策结算结果',
+            submittedText: '',
+            reviewReason: '',
+            refs: [],
+            canViewPolicy: false,
+          },
+        ],
+      }}
+      host={false}
+      onError={vi.fn()}
+      onDiscussAction={vi.fn()}
+    />,
+  );
+  expect(screen.getByText('水渠已修复。')).toBeInTheDocument();
+  expect(screen.getByText('河谷')).toBeInTheDocument();
+  expect(screen.queryByText('政策原文')).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: '讨论这份政策' }),
+  ).not.toBeInTheDocument();
+});
+
 it('totals mixed receipts, costs and manpower without mixing resources or losing decimal precision', () => {
   expect(
     resourceTotals([

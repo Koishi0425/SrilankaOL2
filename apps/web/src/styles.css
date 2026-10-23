@@ -325,6 +325,34 @@ legend {
   font-weight: 600;
 }
 
+.result-audience-editor {
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.result-audience-editor p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 10px;
+}
+.result-audience-countries {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.result-audience-countries p {
+  flex-basis: 100%;
+}
+.result-audience-countries label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
 .game-grid {
   display: grid;
   gap: 8px;
@@ -2739,6 +2767,60 @@ select:focus-visible {
 .workspace-drawer .action-center .center-layout {
   flex: 1;
   min-height: 0;
+}
+.round-policy-center .center-layout.round-policy-player {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.round-policy-section {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  margin: 14px 0;
+  min-width: 0;
+}
+.round-policy-section fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+.round-policy-section label,
+.round-policy-review label {
+  display: grid;
+  gap: 6px;
+}
+.round-policy-section-heading,
+.round-policy-fields {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.round-policy-section-heading {
+  justify-content: space-between;
+}
+.round-policy-fields label {
+  flex: 1 1 160px;
+}
+.round-policy-section textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 140px;
+  resize: vertical;
+}
+.round-policy-review {
+  border-top: 1px solid var(--line);
+  margin-top: 18px;
+  padding-top: 12px;
+}
+.round-policy-center .policy-guidance {
+  line-height: 1.7;
+}
+.round-policy-center .rules-text {
+  overflow-wrap: anywhere;
 }
 .workspace-drawer .action-center .center-list,
 .workspace-drawer .action-center .center-detail {

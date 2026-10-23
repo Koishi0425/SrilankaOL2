@@ -975,20 +975,7 @@ export function ActionCenter({
                       ))}
                     </select>
                   </label>
-                  <label>
-                    公开意向
-                    <select
-                      value={secrecy}
-                      onChange={(event) => {
-                        setSecrecy(event.target.value as ActionSecrecy);
-                        setDirty(true);
-                      }}
-                    >
-                      <option value="OwnerOnly">仅本国与主持人</option>
-                      <option value="Participants">请主持人告知相关方</option>
-                      <option value="Public">请主持人公开</option>
-                    </select>
-                  </label>
+                  <p>政策结果向谁可见，由主持人在结算时根据内容决定。</p>
                 </div>
                 {overSuggestion && (
                   <p className="review-request">

@@ -62,6 +62,7 @@ export interface CurrentUser {
 }
 
 export type RegistrationMode = 'Open' | 'InviteOnly' | 'Closed';
+export const MINIMUM_PASSWORD_LENGTH = 6;
 export interface AuthOptions {
   registrationMode: RegistrationMode;
   minimumPasswordLength: number;
@@ -689,6 +690,57 @@ export interface ActionDetails extends ActionSummary {
   submissions: ActionSubmission[];
 }
 
+export interface RoundPolicySectionInput {
+  id: string;
+  title: string;
+  text: string;
+  category: ActionCategory;
+  secrecy: ActionSecrecy;
+  refs: Array<Omit<ActionObjectRef, 'id'>>;
+}
+export interface RoundPolicySection extends RoundPolicySectionInput {
+  status: ActionStatus;
+  reviewReason: string;
+}
+export interface RoundPolicySummary {
+  quarterId: string;
+  memberId: string;
+  countryId: string;
+  countryName: string;
+  playerName: string;
+  status: ActionStatus | 'Mixed';
+  sectionCount: number;
+  submittedAt: string | null;
+}
+export interface RoundPolicy extends RoundPolicySummary {
+  revision: string;
+  quarter: QuarterSummary;
+  canEdit: boolean;
+  canSubmit: boolean;
+  sections: RoundPolicySection[];
+  draftSections?: RoundPolicySectionInput[];
+  pendingInputRequest: string | null;
+  interpretation: string;
+  history: Array<{
+    id: string;
+    submittedAt: string;
+    whole: boolean;
+    sections: RoundPolicySectionInput[];
+  }>;
+}
+export interface SaveRoundPolicyInput {
+  requestId: string;
+  expectedRevision: string;
+  sections: RoundPolicySectionInput[];
+  submit: boolean;
+}
+export interface ReviewRoundPolicyInput {
+  requestId: string;
+  expectedRevision: string;
+  target: 'NeedPlayerInput' | 'Approved' | 'Rejected' | 'Interpretation';
+  reason: string;
+}
+
 export interface SettlementSummary {
   correctedAt?: string | null;
   quarterId: string;
@@ -700,6 +752,10 @@ export interface SettlementSummary {
   publishedAt: string | null;
 }
 
+export type SettlementResultAudience =
+  | { kind: 'OwnerOnly' | 'Public' | 'HostOnly' }
+  | { kind: 'Countries'; countryIds: string[] };
+
 export interface SettlementAction {
   actionId: string;
   countryId: string;
@@ -709,11 +765,17 @@ export interface SettlementAction {
   status: 'Approved' | 'Rejected' | 'Completed';
   reviewReason: string;
   feedback: string;
+  /** Host chooses at settlement; legacy snapshots default to OwnerOnly. */
+  resultAudience?: SettlementResultAudience;
+  /** False for recipients who can read the result but not the original policy. */
+  canViewPolicy?: boolean;
   /** Formal submission targets; absent in older published snapshots. */
   refs?: Array<Omit<ActionObjectRef, 'id'>>;
 }
 
 export interface QuarterSettlement {
+  /** Audience choices are returned only to the host. */
+  resultCountries?: Array<{ id: string; name: string }>;
   correctionVersion?: number;
   corrections?: SettlementCorrection[];
   quarter: QuarterSummary;
@@ -1031,7 +1093,11 @@ export interface SettlementStateOptions {
 export interface SaveSettlementInput {
   expectedVersion: number;
   publicReport: string;
-  results: Array<{ actionId: string; feedback: string }>;
+  results: Array<{
+    actionId: string;
+    feedback: string;
+    resultAudience?: SettlementResultAudience;
+  }>;
   stateChanges?: SettlementStateChangeInput[];
   battles?: SettlementBattleInput[];
   resourceChanges?: ResourceChangeInput[];

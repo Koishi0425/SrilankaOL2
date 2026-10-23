@@ -110,10 +110,32 @@ export function TurnOverview({
   onRetry: () => void;
   onClose: () => void;
 }) {
-  const pending = actions.filter(
-    (a) =>
-      !['Completed', 'Rejected', 'Withdrawn', 'Invalidated'].includes(a.status),
-  );
+  const groups = new Map<string, ActionSummary[]>();
+  for (const action of actions) {
+    const key = `${action.quarterId}:${action.createdByMemberId}:${action.countryId}`;
+    groups.set(key, [...(groups.get(key) ?? []), action]);
+  }
+  const pending = [...groups.values()].flatMap((group) => {
+    const active = group.filter(
+      (a) =>
+        !['Completed', 'Rejected', 'Withdrawn', 'Invalidated'].includes(
+          a.status,
+        ),
+    );
+    if (!active.length) return [];
+    const representative =
+      active.find((a) => a.status === 'NeedPlayerInput') ??
+      active.find((a) => ['Submitted', 'HostReview'].includes(a.status)) ??
+      active[0]!;
+    return [
+      {
+        ...representative,
+        sectionCount: group.filter(
+          (a) => !['Withdrawn', 'Invalidated'].includes(a.status),
+        ).length,
+      },
+    ];
+  });
   return (
     <aside id="turn-overview" className="turn-overview" aria-label="回合事务">
       <header className="workspace-drawer__heading">
@@ -134,12 +156,16 @@ export function TurnOverview({
             {pending.map((a) => (
               <li key={a.id}>
                 <button onClick={() => onOpenAction(a.id)}>
-                  <strong>{a.title}</strong>
+                  <strong>
+                    {['Host', 'Administrator'].includes(game.role)
+                      ? `${a.countryName} · 本回合政策`
+                      : '本回合政策'}
+                  </strong>
                   <span>
                     {['Host', 'Administrator'].includes(game.role)
                       ? `${a.countryName} · `
                       : ''}
-                    {statusNames[a.status]}
+                    {statusNames[a.status]} · {a.sectionCount} 项内容
                   </span>
                 </button>
               </li>

@@ -14,6 +14,7 @@ import type { DatabaseClient, DatabasePool } from '@srilanka/database';
 
 import { ApiFault } from '../../errors.js';
 import { ensurePolicyConversation } from '../communications/policy-conversation.js';
+import { RoundPolicyService } from './round-policy-service.js';
 
 interface MemberContext {
   id: string;
@@ -65,7 +66,15 @@ function summary(row: ActionRow): ActionSummary {
 }
 
 export class ActionService {
-  constructor(private readonly database: DatabasePool) {}
+  readonly roundPolicies: RoundPolicyService;
+  constructor(private readonly database: DatabasePool) {
+    this.roundPolicies = new RoundPolicyService(
+      database,
+      (db, gameId, countryId, refs) =>
+        this.validateRefs(db, gameId, countryId, refs),
+      (gameId, userId, actionId, db) => this.get(gameId, userId, actionId, db),
+    );
+  }
 
   private async member(
     gameId: string,
@@ -445,9 +454,10 @@ export class ActionService {
     gameId: string,
     userId: string,
     actionId: string,
+    db: DatabasePool | DatabaseClient = this.database,
   ): Promise<ActionDetails> {
-    const member = await this.member(gameId, userId);
-    const result = await this.database.query<ActionRow>(
+    const member = await this.member(gameId, userId, db);
+    const result = await db.query<ActionRow>(
       `${actionSelect}
        WHERE a.game_id = $1 AND a.id = $2
          AND ($3::boolean OR a.country_id = $4)`,
@@ -462,7 +472,7 @@ export class ActionService {
     if (!row) throw new ApiFault(404, 'OBJECT_NOT_FOUND', '未找到该行动。');
     const [refs, submissions, interpretation, request, history] =
       await Promise.all([
-        this.database.query<{
+        db.query<{
           id: string;
           ref_kind: ActionObjectRef['refKind'];
           object_type: ActionObjectRef['objectType'];
@@ -473,7 +483,7 @@ export class ActionService {
          FROM action_object_refs WHERE game_id = $1 AND action_id = $2 ORDER BY id`,
           [gameId, actionId],
         ),
-        this.database.query<{
+        db.query<{
           id: string;
           version: number;
           title: string;
@@ -488,18 +498,18 @@ export class ActionService {
          ORDER BY submitted_at DESC, id DESC`,
           [gameId, actionId],
         ),
-        this.database.query<{ text: string }>(
+        db.query<{ text: string }>(
           `SELECT text FROM action_interpretations
          WHERE game_id = $1 AND action_id = $2 ORDER BY created_at DESC LIMIT 1`,
           [gameId, actionId],
         ),
-        this.database.query<{ message: string }>(
+        db.query<{ message: string }>(
           `SELECT message FROM action_input_requests
          WHERE game_id = $1 AND action_id = $2 AND status = 'Pending'
          ORDER BY created_at DESC LIMIT 1`,
           [gameId, actionId],
         ),
-        this.database.query<{
+        db.query<{
           from_status: ActionStatus | null;
           to_status: ActionStatus;
           reason: string;

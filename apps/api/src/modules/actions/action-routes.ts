@@ -7,7 +7,11 @@ import type { ActionService } from './action-service.js';
 import { actionCategorySchema } from '../games/game-rules.js';
 
 const category = actionCategorySchema;
-const secrecy = z.enum(['OwnerOnly', 'Participants', 'Public']);
+// Legacy clients may still send this field. Disclosure is now decided at settlement.
+const secrecy = z
+  .enum(['OwnerOnly', 'Participants', 'Public'])
+  .default('OwnerOnly')
+  .transform(() => 'OwnerOnly' as const);
 const refSchema = z.object({
   refKind: z.enum(['Actor', 'Target', 'Context']),
   objectType: z.enum([
@@ -73,6 +77,141 @@ export async function registerActionRoutes(
   auth: AuthService,
   actions: ActionService,
 ) {
+  const roundParams = gameParams.extend({ quarterId: z.uuid() });
+  const ownerParams = roundParams.extend({ memberId: z.uuid() });
+  const ownerQuery = z.object({ countryId: z.uuid() });
+  const roundSave = z.object({
+    requestId: z.uuid(),
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    submit: z.boolean(),
+    sections: z
+      .array(
+        z.object({
+          id: z.uuid(),
+          title: z.string().trim().min(1).max(160),
+          text: z.string().max(20_000),
+          category,
+          secrecy,
+          refs: z.array(refSchema).max(30),
+        }),
+      )
+      .max(500),
+  });
+  const roundReview = z.object({
+    requestId: z.uuid(),
+    expectedRevision: roundSave.shape.expectedRevision,
+    target: z.enum([
+      'NeedPlayerInput',
+      'Approved',
+      'Rejected',
+      'Interpretation',
+    ]),
+    reason: z.string().trim().min(1).max(4000),
+  });
+  app.get(
+    '/api/v1/games/:gameId/quarters/:quarterId/policy-submissions',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      const params = parse(request, reply, roundParams, request.params);
+      if (!user || !params) return reply;
+      return envelope(
+        request,
+        await actions.roundPolicies.list(
+          params.gameId,
+          user.id,
+          params.quarterId,
+        ),
+      );
+    },
+  );
+  app.get(
+    '/api/v1/games/:gameId/quarters/:quarterId/my-policy',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      const params = parse(request, reply, roundParams, request.params);
+      if (!user || !params) return reply;
+      return envelope(
+        request,
+        await actions.roundPolicies.mine(
+          params.gameId,
+          user.id,
+          params.quarterId,
+        ),
+      );
+    },
+  );
+  app.put(
+    '/api/v1/games/:gameId/quarters/:quarterId/my-policy',
+    { bodyLimit: 16 * 1024 * 1024 },
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      const params = parse(request, reply, roundParams, request.params);
+      const body = parse(request, reply, roundSave, request.body);
+      if (!user || !params || !body) return reply;
+      return envelope(
+        request,
+        await actions.roundPolicies.save(
+          params.gameId,
+          user.id,
+          params.quarterId,
+          body,
+        ),
+      );
+    },
+  );
+  app.get(
+    '/api/v1/games/:gameId/quarters/:quarterId/policy-submissions/:memberId',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      const params = parse(request, reply, ownerParams, request.params);
+      const query = parse(request, reply, ownerQuery, request.query);
+      if (!user || !params || !query) return reply;
+      return envelope(
+        request,
+        await actions.roundPolicies.get(
+          params.gameId,
+          user.id,
+          params.quarterId,
+          params.memberId,
+          query.countryId,
+        ),
+      );
+    },
+  );
+  app.post(
+    '/api/v1/games/:gameId/quarters/:quarterId/policy-submissions/:memberId/review',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      const params = parse(request, reply, ownerParams, request.params);
+      const query = parse(request, reply, ownerQuery, request.query);
+      const body = parse(request, reply, roundReview, request.body);
+      if (!user || !params || !query || !body) return reply;
+      return envelope(
+        request,
+        await actions.roundPolicies.review(
+          { ...params, countryId: query.countryId },
+          user.id,
+          body,
+        ),
+      );
+    },
+  );
+  app.get(
+    '/api/v1/games/:gameId/actions/:actionId/round-policy',
+    async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      const params = parse(request, reply, actionParams, request.params);
+      if (!user || !params) return reply;
+      return envelope(
+        request,
+        await actions.roundPolicies.fromAction(
+          params.gameId,
+          user.id,
+          params.actionId,
+        ),
+      );
+    },
+  );
   app.get('/api/v1/games/:gameId/actions', async (request, reply) => {
     const user = await requireUser(request, reply, auth);
     const params = parse(request, reply, gameParams, request.params);

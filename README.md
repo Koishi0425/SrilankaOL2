@@ -4,6 +4,8 @@
 
 目前包含地图与战争迷雾、国家资料、经济与贸易、外交、军事、政府、政策讨论、回合结算和历史记录。模型辅助可选，用于已发布结果速览与主持人反馈起草，不自动裁决或发布。
 
+政策按玩家与回合整份编写、一次提交、统一评阅；分项分类只作提示，可重复或自拟标题。旧记录自动汇总，详见[整份回合政策](docs/整份回合政策.md)。
+
 ## Docker 部署
 
 需要 Docker Engine / Docker Desktop（Linux 容器）和 Docker Compose v2.24 以上。部署机器无需安装 Node.js、pnpm 或 PostgreSQL。以下命令均在本 README 所在的仓库根目录执行。
@@ -48,7 +50,7 @@ docker compose --env-file .env.docker ps -a
 docker compose --env-file .env.docker exec api node apps/api/dist/bootstrap-host.js
 ```
 
-按提示输入用户名、显示名称及密码。密码至少 15 个字符，输入时不回显。此命令仅在数据库完全没有账号时创建第一位用户；已有账号时会拒绝，不会重置账号、创建示例游戏或覆盖存档。
+按提示输入用户名、显示名称及密码。密码至少 6 个字符，输入时不回显。注册、登录、改密和重置密码采用同一下限。此命令仅在数据库完全没有账号时创建第一位用户；已有账号时会拒绝，不会重置账号、创建示例游戏或覆盖存档。
 
 之后在网页登录，创建游戏、设置国家和规则。主持人可生成账号邀请码供其他玩家注册，再把玩家加入游戏并分配国家。已有存档无需再次初始化；账号恢复见下文。
 
@@ -150,16 +152,19 @@ docker compose --env-file .env.docker cp api:/app/backups/. ./backups/docker
 
 ### 更新和停止
 
-更新前先执行手动备份并保存当前 Git 提交号，再更新源码：
+首次部署完成后，在服务器仓库内执行一条命令即可更新：
 
 ```sh
-docker compose --env-file .env.docker stop web api
-git pull
-docker compose --env-file .env.docker build --pull api web
-docker compose --env-file .env.docker up -d --wait --wait-timeout 180
+sh infrastructure/scripts/update.sh
 ```
 
-如启用了 worker，同样停止并重新构建 worker。升级自动应用新的 SQL 迁移，不自动回退数据库；回退时使用对应源码和恢复到新库的备份。
+命令需要服务器已有 Git、Docker 和 Compose v2.24 以上，跟踪上游分支且工作区干净；无需安装 Node.js 或 pnpm。首次采用此更新入口时，先 `git pull --ff-only` 获取脚本，之后均可直接使用上述命令。Windows 的 Git Bash 也可执行；PowerShell 可使用 `& 'C:\Program Files\Git\bin\bash.exe' infrastructure/scripts/update.sh`。
+
+脚本自动快进拉取当前分支、构建新版 API/网页，然后短暂停止应用写入，使用原运行镜像创建并校验恢复点，再执行数据库迁移、启动新版本并等待健康检查。原来正在使用的 worker 会一同更新。原 Compose 项目名、私有配置、数据库、Redis、备份和证书数据卷保留，无需重新建局或创建账号。构建阶段原应用继续运行；迁移和重启期间会短暂无法访问，因此应在本轮文字保存后更新。
+
+自定义部署配置使用 `sh infrastructure/scripts/update.sh --env-file /path/to/private.env`。若已手动拉取代码或采用离线更新，可加 `--no-pull`。脚本不会清理本地修改、运行种子或删除数据卷，也不会在更新时升级数据库/Redis镜像。
+
+构建失败时原应用继续运行。备份或迁移失败时停止后续发布；排查后重新执行同一命令可继续，重试须保留失败时的代码和配置，避免再拉取其他版本。恢复点成功后保留在备份卷，原运行镜像在更新期间用于备份，勿在此期间清理 Docker 镜像。更新进度保存在 Git 目录中的 `srilanka-update-state`；只有健康检查通过才清除，且并发更新会被拒绝。进程被强制终止后如遗留 `srilanka-update.lock` 空目录，先确认没有更新进程，再移除该空目录重试。更新不自动回退已执行的 SQL 迁移；需要回退时使用恢复点中对应源码和恢复到新库的存档，见 [备份与恢复说明](infrastructure/database/BACKUP.md)。
 
 ```sh
 # 移除容器，保留持久化数据。

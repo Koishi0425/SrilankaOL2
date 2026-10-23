@@ -3,6 +3,7 @@ import { Writable } from 'node:stream';
 import { loadServiceConfig } from '@srilanka/config';
 import { createDatabasePool } from '@srilanka/database';
 import { bootstrapHost } from './modules/auth/bootstrap-host.js';
+import { MINIMUM_PASSWORD_LENGTH } from './modules/auth/credentials.js';
 
 async function readInput(): Promise<unknown> {
   if (process.argv.includes('--stdin')) {
@@ -37,7 +38,9 @@ async function readInput(): Promise<unknown> {
   try {
     const username = await prompt.question('主持人用户名：');
     const displayName = await prompt.question('显示名称：');
-    process.stdout.write('密码（至少15个字符，输入不回显）：');
+    process.stdout.write(
+      `密码（至少${MINIMUM_PASSWORD_LENGTH}个字符，输入不回显）：`,
+    );
     hidden = true;
     const password = await prompt.question('');
     process.stdout.write('\n再次输入密码：');

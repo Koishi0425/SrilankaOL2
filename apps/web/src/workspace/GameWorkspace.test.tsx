@@ -29,6 +29,10 @@ import {
   locateMapReference,
   assignCountry,
   fetchProvinces,
+  fetchRoundPolicies,
+  fetchMyRoundPolicy,
+  fetchRoundPolicy,
+  fetchRoundPolicyForAction,
 } from '../api.js';
 import { GameWorkspace } from './GameWorkspace.js';
 vi.mock('../api.js', async (importOriginal) => ({
@@ -47,6 +51,10 @@ vi.mock('../api.js', async (importOriginal) => ({
   locateMapReference: vi.fn(),
   assignCountry: vi.fn(),
   fetchProvinces: vi.fn(),
+  fetchRoundPolicies: vi.fn(),
+  fetchMyRoundPolicy: vi.fn(),
+  fetchRoundPolicy: vi.fn(),
+  fetchRoundPolicyForAction: vi.fn(),
 }));
 vi.mock('../map/HexMap.js', () => ({
   HexMap: ({
@@ -186,8 +194,51 @@ const action: ActionDetails = {
   history: [],
   submissions: [],
 };
+const roundPolicy = (a = action) => ({
+  quarterId: a.quarterId,
+  memberId: a.createdByMemberId,
+  countryId: a.countryId,
+  countryName: a.countryName,
+  playerName: '玩家甲',
+  status: a.status,
+  sectionCount: 1,
+  submittedAt: a.submittedAt,
+  revision: 'a'.repeat(64),
+  quarter: game.currentQuarter,
+  canEdit: true,
+  canSubmit: true,
+  sections: [
+    {
+      id: a.id,
+      title: a.title,
+      text: a.submittedOriginalText ?? '',
+      category: a.category,
+      secrecy: a.secrecy,
+      refs: a.refs,
+      status: a.status,
+      reviewReason: '',
+    },
+  ],
+  draftSections: [
+    {
+      id: a.id,
+      title: a.title,
+      text: a.currentText,
+      category: a.category,
+      secrecy: a.secrecy,
+      refs: a.refs,
+    },
+  ],
+  pendingInputRequest: a.pendingInputRequest,
+  interpretation: '',
+  history: [],
+});
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(fetchRoundPolicies).mockResolvedValue([roundPolicy()]);
+  vi.mocked(fetchMyRoundPolicy).mockResolvedValue(roundPolicy());
+  vi.mocked(fetchRoundPolicy).mockResolvedValue(roundPolicy());
+  vi.mocked(fetchRoundPolicyForAction).mockResolvedValue(roundPolicy());
   vi.mocked(fetchCountries).mockResolvedValue([country]);
   vi.mocked(fetchProvinces).mockResolvedValue({
     canEdit: false,
@@ -332,12 +383,12 @@ it('locates a province from a reviewed policy and returns to the same policy wit
     label: '省份：北境',
   };
   vi.mocked(fetchAction).mockResolvedValue({ ...action, refs: [ref] });
+  vi.mocked(fetchMyRoundPolicy).mockResolvedValue(
+    roundPolicy({ ...action, refs: [ref] }),
+  );
   render(<GameWorkspace game={game} />);
   await screen.findByRole('navigation', { name: '游戏工作区' });
   fireEvent.click(nav().getByRole('button', { name: '政策' }));
-  fireEvent.click(
-    await screen.findByRole('button', { name: /北境探索.*北国/ }),
-  );
   fireEvent.click(await screen.findByRole('button', { name: '省份：北境' }));
   expect(await screen.findByText('已定位 located-tile（9,6）')).toBeVisible();
   expect(locateMapReference).toHaveBeenCalledWith(
@@ -347,16 +398,16 @@ it('locates a province from a reviewed policy and returns to the same policy wit
     expect.objectContaining({ signal: expect.any(AbortSignal) }),
   );
   fireEvent.click(screen.getByRole('button', { name: '返回政策' }));
-  expect(screen.getByLabelText('政策 / 行动内容')).toHaveValue('指定探索路线');
-  expect(screen.getByRole('heading', { name: '北境探索' })).toBeVisible();
+  expect(screen.getByLabelText('具体政策')).toHaveValue('指定探索路线');
+  expect(screen.getByLabelText('分项标题（可自拟）')).toHaveValue('北境探索');
 });
 it('keeps map selection and uncreated policy text through menus and Escape; map objects reopen their detail view', async () => {
   render(<GameWorkspace game={game} />);
   await screen.findByRole('navigation', { name: '游戏工作区' });
   await nav().findByRole('button', { name: '政策' });
   fireEvent.click(screen.getByRole('button', { name: '将测试地块加入政策' }));
-  await screen.findByLabelText('政策 / 行动内容');
-  fireEvent.change(screen.getByLabelText('政策 / 行动内容'), {
+  await screen.findByLabelText('具体政策');
+  fireEvent.change(screen.getByLabelText('具体政策'), {
     target: { value: '携带补给，自由探索东岸堡' },
   });
   fireEvent.click(nav().getByRole('button', { name: /^消息/ }));
@@ -364,7 +415,7 @@ it('keeps map selection and uncreated policy text through menus and Escape; map 
     target: { value: '向主持人说明意图' },
   });
   fireEvent.click(nav().getByRole('button', { name: '政策' }));
-  expect(screen.getByLabelText('政策 / 行动内容')).toHaveValue(
+  expect(screen.getByLabelText('具体政策')).toHaveValue(
     '携带补给，自由探索东岸堡',
   );
   fireEvent.keyDown(window, { key: 'Escape' });
@@ -374,7 +425,7 @@ it('keeps map selection and uncreated policy text through menus and Escape; map 
   expect(screen.getByText('地图保留东岸堡选中状态')).toBeVisible();
   expect(nav().getByRole('button', { name: '政策' })).toHaveFocus();
   fireEvent.click(nav().getByRole('button', { name: '政策' }));
-  expect(screen.getByLabelText('政策 / 行动内容')).toHaveValue(
+  expect(screen.getByLabelText('具体政策')).toHaveValue(
     '携带补给，自由探索东岸堡',
   );
   fireEvent.click(screen.getByRole('button', { name: '查看地图地块' }));
@@ -390,11 +441,11 @@ it('routes a current pending action into review, its policy conversation and bac
   await screen.findByRole('navigation', { name: '游戏工作区' });
   fireEvent.click(nav().getByRole('button', { name: '回合事务' }));
   const tasks = await screen.findByRole('complementary', { name: '回合事务' });
-  await within(tasks).findByText('北境探索');
+  await within(tasks).findByText('本回合政策');
   expect(screen.queryByText('旧回合探索')).not.toBeInTheDocument();
-  fireEvent.click(within(tasks).getByRole('button', { name: /北境探索/ }));
+  fireEvent.click(within(tasks).getByRole('button', { name: /本回合政策/ }));
   await screen.findByDisplayValue('指定探索路线');
-  fireEvent.click(screen.getByRole('button', { name: '讨论这份政策' }));
+  fireEvent.click(screen.getByRole('button', { name: '讨论整份政策' }));
   expect(
     await screen.findByText('已打开关联讨论：policy-discussion'),
   ).toBeVisible();
@@ -454,7 +505,7 @@ it('updates remote quarter changes and clears previous quarter tasks without rel
   render(<GameWorkspace game={game} />);
   await screen.findByRole('navigation', { name: '游戏工作区' });
   fireEvent.click(nav().getByRole('button', { name: '回合事务' }));
-  await screen.findByText('北境探索');
+  await screen.findByText('本回合政策');
   vi.mocked(fetchGame).mockResolvedValue({
     ...game,
     currentQuarter: {
@@ -471,7 +522,7 @@ it('updates remote quarter changes and clears previous quarter tasks without rel
   fireEvent(document, new Event('visibilitychange'));
   expect(await screen.findByText('第 3 年 · 冬季')).toBeVisible();
   await waitFor(() =>
-    expect(screen.queryByText('北境探索')).not.toBeInTheDocument(),
+    expect(screen.queryByText('本回合政策')).not.toBeInTheDocument(),
   );
   expect(screen.getByText('暂无待处理政策。')).toBeVisible();
 });
@@ -483,7 +534,7 @@ it('expands a policy for writing and restores the map without losing its draft',
     screen.queryByRole('complementary', { name: '回合事务' }),
   ).not.toBeInTheDocument();
   fireEvent.click(nav().getByRole('button', { name: '政策' }));
-  fireEvent.change(await screen.findByLabelText('政策 / 行动内容'), {
+  fireEvent.change(await screen.findByLabelText('具体政策'), {
     target: { value: '先与邻国交涉，再决定探索路线。' },
   });
   fireEvent.click(screen.getByRole('button', { name: '展开面板' }));
@@ -493,7 +544,7 @@ it('expands a policy for writing and restores the map without losing its draft',
   );
   fireEvent.click(screen.getByRole('button', { name: '关闭面板' }));
   fireEvent.click(nav().getByRole('button', { name: '政策' }));
-  expect(screen.getByLabelText('政策 / 行动内容')).toHaveValue(
+  expect(screen.getByLabelText('具体政策')).toHaveValue(
     '先与邻国交涉，再决定探索路线。',
   );
   expect(screen.getByRole('button', { name: '展开面板' })).toHaveAttribute(

@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
+  canReadResult,
+  projectResult,
+  prepareResultAudiences,
+} from './result-audience.js';
+import {
   correctedText,
   readCorrections,
   SettlementCorrectionService,
@@ -238,9 +243,7 @@ export class SettlementService {
        ORDER BY c.name, a.submitted_at, a.id`,
       [gameId, quarterId],
     );
-    const feedback = new Map(
-      results.map((item) => [item.actionId, item.feedback]),
-    );
+    const feedback = new Map(results.map((item) => [item.actionId, item]));
     return rows.rows.map((row): SettlementAction => ({
       actionId: row.id,
       countryId: row.country_id,
@@ -249,7 +252,10 @@ export class SettlementService {
       submittedText: row.submitted_text,
       status: row.status,
       reviewReason: row.review_reason,
-      feedback: feedback.get(row.id) ?? '',
+      feedback: feedback.get(row.id)?.feedback ?? '',
+      resultAudience: feedback.get(row.id)?.resultAudience ?? {
+        kind: 'OwnerOnly',
+      },
       refs: row.refs,
     }));
   }
@@ -261,7 +267,18 @@ export class SettlementService {
     >(
       `SELECT q.*, s.published_at, (
          SELECT MAX(c.created_at) FROM settlement_corrections c WHERE c.game_id=q.game_id AND c.quarter_id=q.id
-           AND ($2::boolean OR c.kind='PublicReport' OR ($3::boolean AND c.country_id=$4::uuid))
+           AND ($2::boolean OR c.kind='PublicReport'
+             OR (c.kind <> 'ActionFeedback' AND $3::boolean AND c.country_id=$4::uuid)
+             OR (c.kind='ActionFeedback' AND EXISTS (
+               SELECT 1 FROM jsonb_array_elements(COALESCE(s.published_snapshot->'actions','[]'::jsonb)) a
+               WHERE a->>'actionId'=c.data->>'actionId' AND (
+                 a->'resultAudience'->>'kind'='Public'
+                 OR ($3::boolean AND $4::uuid IS NOT NULL AND (
+                   (COALESCE(a->'resultAudience'->>'kind','OwnerOnly')='OwnerOnly' AND a->>'countryId'=$4::text)
+                   OR (a->'resultAudience'->>'kind'='Countries' AND a->'resultAudience'->'countryIds' ? $4::text)
+                 ))
+               )
+             )))
        ) AS corrected_at FROM quarters q
        LEFT JOIN quarter_settlements s ON s.game_id = q.game_id AND s.quarter_id = q.id
        WHERE q.game_id = $1 AND ($2::boolean OR q.is_current OR s.published_at IS NOT NULL)
@@ -320,18 +337,52 @@ export class SettlementService {
           (member.host ? (draft?.public_report ?? '') : ''),
         actions: member.host
           ? actions
-          : actions.filter(
-              (action) =>
-                action.countryId === member.controlled_country_id &&
-                member.role === 'Player',
-            ),
-        corrections: corrections.filter(
-          ({ change }) =>
-            member.host ||
-            change.kind === 'PublicReport' ||
-            (member.role === 'Player' &&
-              change.countryId === member.controlled_country_id),
-        ),
+          : actions
+              .filter((action) =>
+                canReadResult(
+                  action,
+                  member.role,
+                  member.controlled_country_id,
+                ),
+              )
+              .map((action) =>
+                projectResult(
+                  action,
+                  member.role,
+                  member.controlled_country_id,
+                ),
+              ),
+        corrections: corrections
+          .filter(
+            ({ change }) =>
+              member.host ||
+              change.kind === 'PublicReport' ||
+              (change.kind === 'ActionFeedback'
+                ? actions.some(
+                    (action) =>
+                      action.actionId === change.actionId &&
+                      canReadResult(
+                        action,
+                        member.role,
+                        member.controlled_country_id,
+                      ),
+                  )
+                : member.role === 'Player' &&
+                  change.countryId === member.controlled_country_id),
+          )
+          .map((correction) =>
+            !member.host &&
+            correction.change.kind === 'ActionFeedback' &&
+            !(
+              member.role === 'Player' &&
+              correction.change.countryId === member.controlled_country_id
+            )
+              ? {
+                  ...correction,
+                  change: { ...correction.change, title: '政策结算结果' },
+                }
+              : correction,
+          ),
         ...(member.host ? { correctionVersion: corrections.length } : {}),
       };
       const reveals =
@@ -345,6 +396,12 @@ export class SettlementService {
               plan.countryId === member.controlled_country_id,
           );
       if (member.host) {
+        data.resultCountries = (
+          await client.query<{ id: string; name: string }>(
+            'SELECT id,name FROM countries WHERE game_id=$1 ORDER BY name,id',
+            [gameId],
+          )
+        ).rows;
         data.diplomacyChanges =
           published?.diplomacyChanges ?? draft?.diplomacy_changes ?? [];
         data.economyStatus = {
@@ -565,6 +622,12 @@ export class SettlementService {
           '反馈中包含重复或不属于本回合的政策。',
         );
       }
+      const results = await prepareResultAudiences(
+        client,
+        gameId,
+        input.results,
+        draft!.results,
+      );
       const changes =
         input.stateChanges === undefined
           ? draft!.state_changes
@@ -688,7 +751,7 @@ export class SettlementService {
           gameId,
           quarterId,
           input.publicReport,
-          JSON.stringify(input.results),
+          JSON.stringify(results),
           userId,
           JSON.stringify(changes),
           JSON.stringify(battles),

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { MINIMUM_PASSWORD_LENGTH } from '@srilanka/contracts';
 import { ApiFault } from '../../errors.js';
-export const MINIMUM_PASSWORD_LENGTH = 15;
+export { MINIMUM_PASSWORD_LENGTH } from '@srilanka/contracts';
 const N = 16384,
   R = 8,
   P = 5,
@@ -76,7 +77,7 @@ export function assertNewPassword(password: string) {
     throw new ApiFault(
       400,
       'INVALID_NEW_PASSWORD',
-      '新密码需为15至256个字符，可使用短句。',
+      `新密码需为${MINIMUM_PASSWORD_LENGTH}至256个字符，可使用短句。`,
     );
 }
 export const dummyPasswordHash = hashPassword(

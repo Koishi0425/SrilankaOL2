@@ -30,12 +30,12 @@ afterEach(() => {
 beforeEach(() => {
   vi.mocked(api.fetchAuthOptions).mockResolvedValue({
     registrationMode: 'InviteOnly',
-    minimumPasswordLength: 15,
+    minimumPasswordLength: 6,
   });
 });
 const fill = (label: string, value: string) =>
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
-const newPassword = 'a long new account password';
+const newPassword = 'abc123';
 describe('account forms', () => {
   it('requests an invitation only during registration and clears secrets when switching modes', async () => {
     const success = vi.fn().mockResolvedValue(undefined);
@@ -44,7 +44,7 @@ describe('account forms', () => {
     fill('显示名称', '玩家');
     fill('用户名', 'new-user');
     fill('邀请码', 'invite-secret');
-    fill('新密码（至少15个字符）', newPassword);
+    fill('新密码（至少6个字符）', newPassword);
     fireEvent.click(screen.getByRole('button', { name: '注册' }));
     await waitFor(() =>
       expect(api.register).toHaveBeenCalledWith({
@@ -64,10 +64,10 @@ describe('account forms', () => {
     vi.mocked(api.fetchAuthOptions).mockRejectedValue(new Error('network'));
     render(<LoginPanel onSuccess={vi.fn().mockResolvedValue(undefined)} />);
     fill('用户名', 'existing');
-    fill('密码', 'old-password');
+    fill('密码', 'old123');
     fireEvent.click(screen.getByRole('button', { name: '登录' }));
     await waitFor(() =>
-      expect(api.login).toHaveBeenCalledWith('existing', 'old-password'),
+      expect(api.login).toHaveBeenCalledWith('existing', 'old123'),
     );
     expect(
       screen.queryByRole('button', { name: '注册账号' }),
@@ -76,7 +76,7 @@ describe('account forms', () => {
   it('hides registration in closed mode', async () => {
     vi.mocked(api.fetchAuthOptions).mockResolvedValue({
       registrationMode: 'Closed',
-      minimumPasswordLength: 15,
+      minimumPasswordLength: 6,
     });
     render(<LoginPanel onSuccess={vi.fn()} />);
     await waitFor(() => expect(api.fetchAuthOptions).toHaveBeenCalled());
@@ -93,7 +93,7 @@ describe('account forms', () => {
     fireEvent.click(screen.getByRole('button', { name: '使用重置码' }));
     fill('用户名', 'player');
     fill('重置码', 'reset-secret');
-    fill('新密码（至少15个字符）', newPassword);
+    fill('新密码（至少6个字符）', newPassword);
     fill('再次填写新密码', 'different long password');
     fireEvent.click(screen.getByRole('button', { name: '重置密码' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('不一致');
@@ -121,8 +121,8 @@ describe('account forms', () => {
     const view = render(
       <PasswordPanel username="player" onClose={close} onChanged={changed} />,
     );
-    fill('当前密码', 'old-password');
-    fill('新密码（至少15个字符）', newPassword);
+    fill('当前密码', 'old123');
+    fill('新密码（至少6个字符）', newPassword);
     fill('再次填写新密码', newPassword);
     fireEvent.click(screen.getByRole('button', { name: '保存新密码' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -154,7 +154,7 @@ describe('account forms', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: '生成注册邀请码' }),
     );
-    fill('你的当前密码', 'host-password');
+    fill('你的当前密码', 'host12');
     fireEvent.click(screen.getByRole('button', { name: '生成邀请码' }));
     expect(await screen.findByLabelText('生成的邀请码')).toHaveValue(
       'one-time-invitation',

@@ -539,6 +539,7 @@ export function MessageCenter({
                     <textarea
                       required
                       aria-label="消息内容"
+                      aria-keyshortcuts="Control+Enter"
                       rows={3}
                       maxLength={10_000}
                       disabled={
@@ -560,7 +561,17 @@ export function MessageCenter({
                         else local?.clear();
                         setDraftNotice(local?.error ?? '');
                       }}
-                      placeholder="输入消息"
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === 'Enter' &&
+                          event.ctrlKey &&
+                          !event.nativeEvent.isComposing
+                        ) {
+                          event.preventDefault();
+                          event.currentTarget.form?.requestSubmit();
+                        }
+                      }}
+                      placeholder="输入消息，Ctrl+Enter 发送"
                     />
                     <button
                       disabled={

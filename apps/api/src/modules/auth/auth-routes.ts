@@ -9,21 +9,22 @@ import type {
 
 import type { AuthService } from './auth-service.js';
 import { ApiFault } from '../../errors.js';
+import { MINIMUM_PASSWORD_LENGTH } from './credentials.js';
 
 export const SESSION_COOKIE = 'srilanka_session';
 
 const loginSchema = z.object({
   username: z.string().trim().min(1).max(64).regex(/^\S+$/u),
-  password: z.string().min(8).max(256),
+  password: z.string().min(MINIMUM_PASSWORD_LENGTH).max(256),
 });
 const registrationSchema = loginSchema.extend({
   displayName: z.string().trim().min(1).max(120),
-  password: z.string().min(15).max(256),
+  password: loginSchema.shape.password,
   inviteCode: z.string().trim().max(128).optional(),
 });
 const passwordSchema = z.object({
-  currentPassword: z.string().min(8).max(256),
-  newPassword: z.string().min(15).max(256),
+  currentPassword: loginSchema.shape.password,
+  newPassword: loginSchema.shape.password,
 });
 const resetSchema = z.object({
   username: loginSchema.shape.username,
@@ -41,7 +42,7 @@ function parsed<T>(schema: z.ZodType<T>, value: unknown): T {
     throw new ApiFault(
       400,
       'VALIDATION_FAILED',
-      '请检查填写内容；新密码需15至256个字符。',
+      `请检查填写内容；新密码需${MINIMUM_PASSWORD_LENGTH}至256个字符。`,
     );
   return result.data;
 }
@@ -126,7 +127,7 @@ export async function registerAuthRoutes(
         reply,
         400,
         'VALIDATION_FAILED',
-        '请检查用户名和显示名称；新密码需15至256个字符。',
+        `请检查用户名和显示名称；新密码需${MINIMUM_PASSWORD_LENGTH}至256个字符。`,
       );
     }
 

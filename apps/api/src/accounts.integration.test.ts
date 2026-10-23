@@ -20,8 +20,8 @@ const app = await buildApp({
   webOrigin: 'http://localhost:15173',
   health: { checkDatabase: async () => {}, checkRedis: async () => {} },
 });
-const password = 'account-test-password-123',
-  newPassword = '全新的密码是一段足够长的中文短句123';
+const password = 'abc123',
+  newPassword = 'xyz789';
 let host: CurrentUser,
   player: CurrentUser,
   other: CurrentUser,
@@ -99,7 +99,7 @@ describe('account management', () => {
       (
         await post(
           '/auth/password',
-          { currentPassword: password, newPassword: 'too-short' },
+          { currentPassword: password, newPassword: '12345' },
           playerCookie,
         )
       ).statusCode,

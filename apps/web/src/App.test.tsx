@@ -311,7 +311,7 @@ describe('App', () => {
       const url = String(input);
       if (url.endsWith('/auth/options'))
         return jsonResponse({
-          data: { registrationMode: 'Open', minimumPasswordLength: 15 },
+          data: { registrationMode: 'Open', minimumPasswordLength: 6 },
         });
       if (url.endsWith('/health')) {
         return jsonResponse({
@@ -374,7 +374,7 @@ describe('App', () => {
     fireEvent.change(screen.getByLabelText('用户名'), {
       target: { value: 'new-player' },
     });
-    fireEvent.change(screen.getByLabelText('新密码（至少15个字符）'), {
+    fireEvent.change(screen.getByLabelText('新密码（至少6个字符）'), {
       target: { value: 'new-player-password' },
     });
     fireEvent.click(screen.getByRole('button', { name: '注册' }));

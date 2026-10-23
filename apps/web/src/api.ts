@@ -11,6 +11,10 @@ import type {
   ActionSecrecy,
   ActionSummary,
   ActionVersion,
+  RoundPolicy,
+  RoundPolicySummary,
+  SaveRoundPolicyInput,
+  ReviewRoundPolicyInput,
   ApiErrorBody,
   ApiResponse,
   CurrentUser,
@@ -691,6 +695,65 @@ export async function fetchActions(
     ? `/games/${gameId}/host/actions/review-queue`
     : `/games/${gameId}/actions`;
   return (await apiRequest<ActionSummary[]>(path)).data;
+}
+
+export async function fetchRoundPolicies(gameId: string, quarterId: string) {
+  return (
+    await apiRequest<RoundPolicySummary[]>(
+      `/games/${gameId}/quarters/${quarterId}/policy-submissions`,
+    )
+  ).data;
+}
+export async function fetchMyRoundPolicy(gameId: string, quarterId: string) {
+  return (
+    await apiRequest<RoundPolicy>(
+      `/games/${gameId}/quarters/${quarterId}/my-policy`,
+    )
+  ).data;
+}
+export async function fetchRoundPolicy(
+  gameId: string,
+  policy: RoundPolicySummary,
+) {
+  return (
+    await apiRequest<RoundPolicy>(
+      `/games/${gameId}/quarters/${policy.quarterId}/policy-submissions/${policy.memberId}?countryId=${policy.countryId}`,
+    )
+  ).data;
+}
+export async function fetchRoundPolicyForAction(
+  gameId: string,
+  actionId: string,
+) {
+  return (
+    await apiRequest<RoundPolicy>(
+      `/games/${gameId}/actions/${actionId}/round-policy`,
+    )
+  ).data;
+}
+export async function saveRoundPolicy(
+  gameId: string,
+  quarterId: string,
+  input: SaveRoundPolicyInput,
+) {
+  return (
+    await apiRequest<RoundPolicy>(
+      `/games/${gameId}/quarters/${quarterId}/my-policy`,
+      { method: 'PUT', body: JSON.stringify(input) },
+    )
+  ).data;
+}
+export async function reviewRoundPolicy(
+  gameId: string,
+  policy: RoundPolicySummary,
+  input: ReviewRoundPolicyInput,
+) {
+  return (
+    await apiRequest<RoundPolicy>(
+      `/games/${gameId}/quarters/${policy.quarterId}/policy-submissions/${policy.memberId}/review?countryId=${policy.countryId}`,
+      { method: 'POST', body: JSON.stringify(input) },
+    )
+  ).data;
 }
 
 export async function fetchAction(gameId: string, actionId: string) {

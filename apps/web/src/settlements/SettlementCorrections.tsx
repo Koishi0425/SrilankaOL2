@@ -410,7 +410,9 @@ export function SettlementCorrections({
                 <p>
                   {kind === 'PublicReport'
                     ? '公报更正对所有成员可见。'
-                    : '本项更正仅主持人和所属国家玩家可见。'}
+                    : kind === 'ActionFeedback'
+                      ? '反馈更正沿用该结算结果发布时的可见范围。'
+                      : '本项更正仅主持人和所属国家玩家可见。'}
                   {kind === 'Resource' || kind === 'ArmyStrength'
                     ? '确认后立即修改当前数值。'
                     : '确认后显示修正版，原文留在更正记录中。'}

@@ -1,5 +1,9 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ResultAudienceEditor,
+  resultAudienceLabel,
+} from './ResultAudienceEditor.js';
+import {
   isGameReadOnly,
   toStateChangeInput,
   toDiplomacyInput,
@@ -64,7 +68,7 @@ import {
 interface SettlementLocalDraft {
   baseVersion: number;
   publicReport: string;
-  results: Array<{ actionId: string; feedback: string }>;
+  results: SaveSettlementInput['results'];
 }
 function isSettlementDraft(value: unknown): value is SettlementLocalDraft {
   if (!value || typeof value !== 'object') return false;
@@ -77,7 +81,17 @@ function isSettlementDraft(value: unknown): value is SettlementLocalDraft {
       (item) =>
         item &&
         typeof item.actionId === 'string' &&
-        typeof item.feedback === 'string',
+        typeof item.feedback === 'string' &&
+        (item.resultAudience === undefined ||
+          (item.resultAudience &&
+            (['OwnerOnly', 'Public', 'HostOnly'].includes(
+              item.resultAudience.kind,
+            ) ||
+              (item.resultAudience.kind === 'Countries' &&
+                Array.isArray(item.resultAudience.countryIds) &&
+                item.resultAudience.countryIds.every(
+                  (id) => typeof id === 'string',
+                ))))),
     )
   );
 }
@@ -141,9 +155,10 @@ export function SettlementPanel({
       local.write({
         baseVersion: data.version,
         publicReport: data.publicReport,
-        results: data.actions.map(({ actionId, feedback }) => ({
+        results: data.actions.map(({ actionId, feedback, resultAudience }) => ({
           actionId,
           feedback,
+          ...(resultAudience ? { resultAudience } : {}),
         })),
       });
   }, [host, readOnly, dirty, data, localCandidate, local.write]);
@@ -162,13 +177,25 @@ export function SettlementPanel({
   }, [selected, data?.quarter.id]);
 
   function saveInput(current: QuarterSettlement): SaveSettlementInput {
+    const incomplete = current.actions.find(
+      (item) =>
+        item.resultAudience?.kind === 'Countries' &&
+        !item.resultAudience.countryIds.length,
+    );
+    if (incomplete)
+      throw new Error(
+        `“${incomplete.title}”尚未选择可见国家，请至少选择一个国家，或改为“仅主持人”。`,
+      );
     return {
       expectedVersion: current.version,
       publicReport: current.publicReport,
-      results: current.actions.map(({ actionId, feedback }) => ({
-        actionId,
-        feedback,
-      })),
+      results: current.actions.map(
+        ({ actionId, feedback, resultAudience }) => ({
+          actionId,
+          feedback,
+          ...(resultAudience ? { resultAudience } : {}),
+        }),
+      ),
       ...(current.stateChanges
         ? {
             stateChanges: current.stateChanges.map(toStateChangeInput),
@@ -447,11 +474,17 @@ export function SettlementPanel({
       if (
         local.session.saved &&
         next.publicReport === local.session.saved.value.publicReport &&
-        local.session.saved.value.results.every(
-          (result) =>
-            next.actions.find((action) => action.actionId === result.actionId)
-              ?.feedback === result.feedback,
-        )
+        local.session.saved.value.results.every((result) => {
+          const action = next.actions.find(
+            (action) => action.actionId === result.actionId,
+          );
+          return (
+            action?.feedback === result.feedback &&
+            (result.resultAudience === undefined ||
+              JSON.stringify(action.resultAudience) ===
+                JSON.stringify(result.resultAudience))
+          );
+        })
       )
         local.clear();
       accept(next);
@@ -569,7 +602,7 @@ export function SettlementPanel({
             localCandidate.value.publicReport,
             ...localCandidate.value.results.map(
               (result) =>
-                `${data.actions.find((action) => action.actionId === result.actionId)?.title ?? '政策反馈'}\n${result.feedback}`,
+                `${data.actions.find((action) => action.actionId === result.actionId)?.title ?? '政策反馈'}\n${result.feedback}\n可见范围：${resultAudienceLabel(result.resultAudience, data.resultCountries)}`,
             ),
           ].join('\n\n')}
           onDiscard={local.clear}
@@ -581,6 +614,10 @@ export function SettlementPanel({
               publicReport: saved.publicReport,
               actions: data.actions.map((action) => ({
                 ...action,
+                resultAudience:
+                  saved.results.find(
+                    (result) => result.actionId === action.actionId,
+                  )?.resultAudience ?? action.resultAudience,
                 feedback:
                   saved.results.find(
                     (result) => result.actionId === action.actionId,
@@ -860,8 +897,24 @@ export function SettlementPanel({
                         }
                       />
                     </div>
+                    <ResultAudienceEditor
+                      value={action.resultAudience}
+                      countries={data.resultCountries ?? []}
+                      ownerCountryId={action.countryId}
+                      disabled={busy}
+                      onChange={(resultAudience) =>
+                        modified({
+                          ...data,
+                          actions: data.actions.map((item) =>
+                            item.actionId === action.actionId
+                              ? { ...item, resultAudience }
+                              : item,
+                          ),
+                        })
+                      }
+                    />
                     <label>
-                      政策反馈（仅本国与主持人）
+                      政策结算反馈
                       <textarea
                         rows={12}
                         maxLength={20_000}
@@ -1040,7 +1093,9 @@ export function SettlementPanel({
             >
               <h4>发布前核对</h4>
               <SettlementResourceSummary data={data} />
-              <p>发布后，玩家将看到回合公报和本国反馈，本回合结果将锁定。</p>
+              <p>
+                发布后，全体成员可见回合公报，各项反馈按下方可见范围送达。本回合结果及可见范围将锁定。
+              </p>
               <details className="settlement-confirm-stories">
                 <summary>公报与政策反馈</summary>
                 {data.publicReport && (
@@ -1055,6 +1110,13 @@ export function SettlementPanel({
                       {item.countryName} · {item.title}
                     </h5>
                     <p className="rules-text">{item.feedback}</p>
+                    <p>
+                      结果可见范围：
+                      {resultAudienceLabel(
+                        item.resultAudience,
+                        data.resultCountries,
+                      )}
+                    </p>
                   </article>
                 ))}
               </details>

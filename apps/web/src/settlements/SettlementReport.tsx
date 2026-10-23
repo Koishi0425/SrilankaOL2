@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { resultAudienceLabel } from './ResultAudienceEditor.js';
 import type { QuarterSettlement, ResourceChange } from '@srilanka/contracts';
 import { signedAmount, resourceNames } from '../countries/resource-labels.js';
 import { GovernmentRecord } from '../government/GovernmentEditor.js';
@@ -311,9 +312,17 @@ export function SettlementReport({
               {item.title}
               {item.status === 'Rejected' ? '（已拒绝）' : ''}
             </h4>
-            {host && <span>{item.countryName}</span>}
+            {(host || item.canViewPolicy === false) && (
+              <span>{item.countryName}</span>
+            )}
           </header>
           <p className="rules-text">{item.feedback}</p>
+          {host && (
+            <p>
+              结果可见范围：
+              {resultAudienceLabel(item.resultAudience, data.resultCountries)}
+            </p>
+          )}
           {host && <Effects data={data} actionId={item.actionId} />}
           {data.mapReveals
             ?.filter((plan) => plan.actionId === item.actionId)
@@ -325,11 +334,13 @@ export function SettlementReport({
             ))}
           <ActionMapLinks refs={item.refs} onLocate={onLocateReference} />
           <div className="settlement-result-tools">
-            <details className="settlement-original">
-              <summary>政策原文</summary>
-              <pre className="action-original">{item.submittedText}</pre>
-            </details>
-            {onDiscussAction && (
+            {item.canViewPolicy !== false && (
+              <details className="settlement-original">
+                <summary>政策原文</summary>
+                <pre className="action-original">{item.submittedText}</pre>
+              </details>
+            )}
+            {onDiscussAction && item.canViewPolicy !== false && (
               <button
                 onClick={() =>
                   void onDiscussAction(item.actionId).catch((cause: unknown) =>

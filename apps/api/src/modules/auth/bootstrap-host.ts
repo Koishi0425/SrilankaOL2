@@ -1,18 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabasePool } from '@srilanka/database';
 import { z } from 'zod';
-import { assertNewPassword, hashPassword } from './credentials.js';
+import {
+  assertNewPassword,
+  hashPassword,
+  MINIMUM_PASSWORD_LENGTH,
+} from './credentials.js';
 
 export async function bootstrapHost(database: DatabasePool, input: unknown) {
   const parsed = z
     .object({
       username: z.string().trim().min(1).max(64).regex(/^\S+$/u),
       displayName: z.string().trim().min(1).max(120),
-      password: z.string().min(15).max(256),
+      password: z.string().min(MINIMUM_PASSWORD_LENGTH).max(256),
     })
     .safeParse(input);
   if (!parsed.success)
-    throw new Error('请填写有效用户名、显示名称和15至256字符的密码。');
+    throw new Error(
+      `请填写有效用户名、显示名称和${MINIMUM_PASSWORD_LENGTH}至256字符的密码。`,
+    );
   const user = parsed.data;
   assertNewPassword(user.password);
   const passwordHash = await hashPassword(user.password);
