@@ -59,16 +59,20 @@ case "$1" in
   inspect) printf '%s\\n' '${oldImage}'; exit 0 ;;
 esac
 action=''
-explicit_profile=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --profile) explicit_profile=1 ;;
     version|config|ps|build|stop|run|up) action=$1; shift; break ;;
   esac
   shift
 done
 case "$action" in
-  config) case "$*" in *--quiet*) ;; *--services*) printf 'api\\nweb\\n'; [ "$UPDATE_TUNNEL_PROFILE:$explicit_profile" != 1:0 ] || printf 'cloudflared\\n' ;; *) printf 'name: kept-project\\nservices: {}\\n' ;; esac ;;
+  config) case "$*" in
+    *--quiet*) ;;
+    *)
+      printf 'name: kept-project\\nservices:\\n  cloudflared:\\n    environment:\\n      TUNNEL_TOKEN: '
+      if [ "$UPDATE_TUNNEL_CONFIGURED" = 1 ]; then printf 'test-fixture-only\\n'; else printf '""\\n'; fi
+      ;;
+    esac ;;
   ps)
     for service do :; done
     case "$service" in
@@ -110,7 +114,7 @@ exit 0
     async run({
       failure = '',
       worker = '0',
-      tunnelProfile = '0',
+      tunnelConfigured = '0',
       tunnelRunning = '0',
       pull = false,
     } = {}) {
@@ -133,7 +137,7 @@ exit 0
             UPDATE_LOG: posix(log),
             UPDATE_FAIL: failure,
             UPDATE_WORKER: worker,
-            UPDATE_TUNNEL_PROFILE: tunnelProfile,
+            UPDATE_TUNNEL_CONFIGURED: tunnelConfigured,
             UPDATE_TUNNEL_RUNNING: tunnelRunning,
           },
         },
@@ -187,31 +191,39 @@ test(
 );
 
 test(
-  'starts an enabled tunnel after web health checks and preserves it on retry',
+  'starts a configured tunnel after web health checks and supports retry',
   options,
   async (t) => {
     const f = await fixture(t);
-    const failed = await f.run({ failure: 'tunnel', tunnelProfile: '1' });
+    const failed = await f.run({ failure: 'tunnel', tunnelConfigured: '1' });
     assert.notEqual(failed.status, 0);
     assert.ok(
       failed.calls.indexOf('--wait-timeout 180 api web') <
         failed.calls.indexOf('up -d --no-deps cloudflared'),
     );
-    const retry = await f.run();
+    const retry = await f.run({ tunnelConfigured: '1' });
     assert.equal(retry.status, 0, retry.stderr);
-    assert.match(retry.calls, /--profile tunnel up -d --no-deps cloudflared/);
+    assert.match(retry.calls, / up -d --no-deps cloudflared/);
+    assert.doesNotMatch(
+      failed.stdout + failed.stderr + retry.stdout + retry.stderr,
+      /test-fixture-only/,
+    );
     assert.equal(existsSync(f.state), false);
   },
 );
 
 test(
-  'retains a running tunnel even when the profile was enabled only at startup',
+  'remembers a running tunnel through a failed health check and retry',
   options,
   async (t) => {
     const f = await fixture(t);
-    const result = await f.run({ tunnelRunning: '1' });
+    const failed = await f.run({ failure: 'health', tunnelRunning: '1' });
+    assert.notEqual(failed.status, 0);
+    assert.doesNotMatch(failed.calls, / up -d --no-deps cloudflared/);
+    const result = await f.run();
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.calls, /--profile tunnel up -d --no-deps cloudflared/);
+    assert.match(result.calls, / up -d --no-deps cloudflared/);
+    assert.equal(existsSync(f.state), false);
   },
 );
 

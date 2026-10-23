@@ -137,10 +137,10 @@ services:
         condition: service_healthy
     logging: *logging
 
-  # Opt in with COMPOSE_PROFILES=tunnel in .env.docker. Point the published
-  # application at http://web:8082; this trusted ingress is never host-published.
+  # The default public entrypoint. Point the published application at
+  # http://web:8082; this trusted ingress is never host-published.
+  # Local/direct HTTPS trials can explicitly use --scale cloudflared=0.
   cloudflared:
-    profiles: ['tunnel']
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
     stop_grace_period: 30s

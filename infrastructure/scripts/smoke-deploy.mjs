@@ -113,11 +113,12 @@ const jsonBody = (value) => ({
 try {
   console.log(`Isolated deployment: ${project}`);
   compose(['config', '--quiet']);
-  assert.doesNotMatch(compose(['config', '--services']).stdout, /cloudflared/);
+  assert.match(compose(['config', '--services']).stdout, /cloudflared/);
   const tunnelConfig = JSON.parse(
-    compose(['--profile', 'tunnel', 'config', '--format', 'json']).stdout,
+    compose(['config', '--format', 'json']).stdout,
   );
   assert.ok(tunnelConfig.services.cloudflared);
+  assert.equal(tunnelConfig.services.cloudflared.profiles, undefined);
   assert.ok(
     tunnelConfig.services.web.ports.every(
       (port) => Number(port.target) !== 8082,
@@ -131,7 +132,13 @@ try {
     '--wait',
     '--wait-timeout',
     '180',
+    '--scale',
+    'cloudflared=0',
   ]);
+  assert.equal(
+    compose(['ps', '--all', '--quiet', 'cloudflared']).stdout.trim(),
+    '',
+  );
   assert.equal(
     (await (await request('/api/v1/health')).json()).data.status,
     'ok',
@@ -198,7 +205,7 @@ try {
     'Tunnel ingress must preserve the validated visitor IP',
   );
   console.log(
-    'Optional tunnel profile, unpublished ingress and forwarded-IP isolation verified.',
+    'Default tunnel configuration, explicit local opt-out and forwarded-IP isolation verified.',
   );
 
   const user = {
@@ -304,7 +311,15 @@ try {
   );
 
   compose(['restart', 'database', 'redis', 'api', 'web']);
-  compose(['up', '-d', '--wait', '--wait-timeout', '180']);
+  compose([
+    'up',
+    '-d',
+    '--wait',
+    '--wait-timeout',
+    '180',
+    '--scale',
+    'cloudflared=0',
+  ]);
   const games = (await (await request('/api/v1/games')).json()).data;
   assert.ok(games.some((item) => item.id === game.id));
   exec('web', 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile');

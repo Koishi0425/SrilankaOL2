@@ -63,10 +63,10 @@ main() {
   compose() {
     docker compose --env-file "$env_file" -f "$root/compose.yaml" -p "$project" --profile worker "$@"
   }
-  enabled_services() {
-    # An explicit --profile overrides COMPOSE_PROFILES, so read the saved
-    # selection without the worker profile used by the operation wrapper.
-    docker compose --env-file "$env_file" -f "$root/compose.yaml" -p "$project" config --services
+  tunnel_configured() {
+    # Inspect Compose's interpolated configuration, never source a private env
+    # file or print its token. Empty tokens are used only by local/direct trials.
+    compose config --format yaml | awk '$1 == "TUNNEL_TOKEN:" && NF > 1 && $2 != "\"\"" { found=1 } END { exit !found }'
   }
   if [ -d "$state" ]; then
     [ "$(cat "$state/environment")" = "$env_checksum" ] && \
@@ -89,12 +89,10 @@ main() {
   esac
   compose config --quiet
   if [ ! -d "$state" ]; then
-    # Profiles selected in the env file are honored; preserve an already-running
-    # tunnel too, including one started with an explicit --profile argument.
-    if enabled_services | grep -qx cloudflared; then tunnel=1; fi
-    if [ -n "$(compose --profile tunnel ps --status running --quiet cloudflared 2>/dev/null)" ]; then tunnel=1; fi
+    if tunnel_configured; then tunnel=1; fi
+    if [ -n "$(compose ps --status running --quiet cloudflared 2>/dev/null)" ]; then tunnel=1; fi
   fi
-  configuration=$(compose --profile tunnel config --format yaml | cksum)
+  configuration=$(compose config --format yaml | cksum)
   if [ -d "$state" ]; then
     [ "$(cat "$state/configuration")" = "$configuration" ] || {
       printf '%s\n' '上次更新的实际部署配置已变化，请还原配置和终端环境变量后重试。' >&2; exit 1;
@@ -119,7 +117,7 @@ main() {
     fi
   fi
   compose config --quiet
-  if enabled_services | grep -qx cloudflared; then tunnel=1; fi
+  if tunnel_configured; then tunnel=1; fi
   printf '%s\n' '构建新版本，现有应用在构建期间继续运行。'
   if [ "$worker" -eq 1 ]; then
     compose build api web worker
@@ -133,7 +131,7 @@ main() {
     printf '%s\n' "$project" > "$state/project"
     printf '%s\n' "$worker" > "$state/worker"
     printf '%s\n' "$tunnel" > "$state/tunnel"
-    compose --profile tunnel config --format yaml | cksum > "$state/configuration"
+    compose config --format yaml | cksum > "$state/configuration"
     # Use the deployed image for the pre-migration backup, including its source.
     printf 'services:\n  api:\n    image: "%s"\n' "$previous_image" > "$state/backup-image.yaml"
   fi
@@ -162,7 +160,7 @@ main() {
   fi
   if [ "$tunnel" -eq 1 ]; then
     printf '%s\n' '网页健康检查已通过，按当前配置启动 Cloudflare Tunnel。'
-    compose --profile tunnel up -d --no-deps cloudflared
+    compose up -d --no-deps cloudflared
     printf '%s\n' '请通过 cloudflared 日志中的 Registered tunnel connection 和公网访问确认隧道连通。'
   fi
   compose ps -a
