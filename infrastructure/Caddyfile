@@ -1,4 +1,14 @@
-{$SITE_ADDRESS::80} {
+{
+	# Trust Cloudflare headers only on the unpublished container ingress.
+	# Docker/LAN clients on the ordinary HTTP/HTTPS ports remain untrusted.
+	servers :8082 {
+		trusted_proxies static private_ranges
+		client_ip_headers CF-Connecting-IP
+		trusted_proxies_strict
+	}
+}
+
+(application) {
 	encode zstd gzip
 	header X-Content-Type-Options nosniff
 
@@ -8,6 +18,8 @@
 
 	handle /api/* {
 		reverse_proxy api:3000 {
+			# API trusts one proxy hop. Forward only Caddy's validated client IP.
+			header_up X-Forwarded-For {client_ip}
 			transport http {
 				read_timeout 150s
 			}
@@ -24,6 +36,15 @@
 		try_files {path} /index.html
 		file_server
 	}
+}
+
+{$SITE_ADDRESS::80} {
+	import application
+}
+
+# Cloudflare published application: http://web:8082. Do not publish this port.
+:8082 {
+	import application
 }
 
 # Internal health endpoint works in both HTTP and automatic HTTPS modes.

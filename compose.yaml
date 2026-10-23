@@ -137,6 +137,21 @@ services:
         condition: service_healthy
     logging: *logging
 
+  # Opt in with COMPOSE_PROFILES=tunnel in .env.docker. Point the published
+  # application at http://web:8082; this trusted ingress is never host-published.
+  cloudflared:
+    profiles: ['tunnel']
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command: ['tunnel', '--no-autoupdate', 'run']
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      web:
+        condition: service_healthy
+    logging: *logging
+
   # No background game jobs currently depend on the worker baseline.
   worker:
     profiles: ['worker']

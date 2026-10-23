@@ -63,6 +63,11 @@ main() {
   compose() {
     docker compose --env-file "$env_file" -f "$root/compose.yaml" -p "$project" --profile worker "$@"
   }
+  enabled_services() {
+    # An explicit --profile overrides COMPOSE_PROFILES, so read the saved
+    # selection without the worker profile used by the operation wrapper.
+    docker compose --env-file "$env_file" -f "$root/compose.yaml" -p "$project" config --services
+  }
   if [ -d "$state" ]; then
     [ "$(cat "$state/environment")" = "$env_checksum" ] && \
       [ "$(cat "$state/revision")" = "$(git rev-parse HEAD)" ] || {
@@ -70,18 +75,26 @@ main() {
     }
     project=$(cat "$state/project")
     worker=$(cat "$state/worker")
+    tunnel=$(cat "$state/tunnel" 2>/dev/null || printf 0)
     maintenance=1
     printf '%s\n' '继续上次更新，本次不再拉取新代码。'
   else
     docker compose --env-file "$env_file" -f "$root/compose.yaml" config --quiet
     project=$(docker compose --env-file "$env_file" -f "$root/compose.yaml" config --format yaml | sed -n 's/^name: //p')
     worker=0
+    tunnel=0
   fi
   case "$project" in
     ''|*[!a-z0-9_-]*) printf '%s\n' '无法识别原部署的 Compose 项目名。' >&2; exit 1 ;;
   esac
   compose config --quiet
-  configuration=$(compose config --format yaml | cksum)
+  if [ ! -d "$state" ]; then
+    # Profiles selected in the env file are honored; preserve an already-running
+    # tunnel too, including one started with an explicit --profile argument.
+    if enabled_services | grep -qx cloudflared; then tunnel=1; fi
+    if [ -n "$(compose --profile tunnel ps --status running --quiet cloudflared 2>/dev/null)" ]; then tunnel=1; fi
+  fi
+  configuration=$(compose --profile tunnel config --format yaml | cksum)
   if [ -d "$state" ]; then
     [ "$(cat "$state/configuration")" = "$configuration" ] || {
       printf '%s\n' '上次更新的实际部署配置已变化，请还原配置和终端环境变量后重试。' >&2; exit 1;
@@ -106,6 +119,7 @@ main() {
     fi
   fi
   compose config --quiet
+  if enabled_services | grep -qx cloudflared; then tunnel=1; fi
   printf '%s\n' '构建新版本，现有应用在构建期间继续运行。'
   if [ "$worker" -eq 1 ]; then
     compose build api web worker
@@ -118,7 +132,8 @@ main() {
     git rev-parse HEAD > "$state/revision"
     printf '%s\n' "$project" > "$state/project"
     printf '%s\n' "$worker" > "$state/worker"
-    compose config --format yaml | cksum > "$state/configuration"
+    printf '%s\n' "$tunnel" > "$state/tunnel"
+    compose --profile tunnel config --format yaml | cksum > "$state/configuration"
     # Use the deployed image for the pre-migration backup, including its source.
     printf 'services:\n  api:\n    image: "%s"\n' "$previous_image" > "$state/backup-image.yaml"
   fi
@@ -145,9 +160,14 @@ main() {
   else
     compose up -d --no-deps --wait --wait-timeout 180 api web
   fi
+  if [ "$tunnel" -eq 1 ]; then
+    printf '%s\n' '网页健康检查已通过，按当前配置启动 Cloudflare Tunnel。'
+    compose --profile tunnel up -d --no-deps cloudflared
+    printf '%s\n' '请通过 cloudflared 日志中的 Registered tunnel connection 和公网访问确认隧道连通。'
+  fi
   compose ps -a
   printf '更新完成，当前版本：%s\n' "$(git rev-parse --short HEAD)"
-  rm -f "$state/environment" "$state/revision" "$state/project" "$state/worker" "$state/configuration" \
+  rm -f "$state/environment" "$state/revision" "$state/project" "$state/worker" "$state/tunnel" "$state/configuration" \
     "$state/backup-image.yaml" "$state/backed-up" "$state/backup.json"
   rmdir "$state"
   maintenance=0

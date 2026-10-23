@@ -59,20 +59,23 @@ case "$1" in
   inspect) printf '%s\\n' '${oldImage}'; exit 0 ;;
 esac
 action=''
+explicit_profile=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --profile) explicit_profile=1 ;;
     version|config|ps|build|stop|run|up) action=$1; shift; break ;;
   esac
   shift
 done
 case "$action" in
-  config) case "$*" in *--quiet*) ;; *) printf 'name: kept-project\\nservices: {}\\n' ;; esac ;;
+  config) case "$*" in *--quiet*) ;; *--services*) printf 'api\\nweb\\n'; [ "$UPDATE_TUNNEL_PROFILE:$explicit_profile" != 1:0 ] || printf 'cloudflared\\n' ;; *) printf 'name: kept-project\\nservices: {}\\n' ;; esac ;;
   ps)
     for service do :; done
     case "$service" in
       database|redis) printf '%s\\n' "$service" ;;
       api) printf '%s\\n' old-api ;;
       worker) [ "$UPDATE_WORKER" != 1 ] || printf '%s\\n' old-worker ;;
+      cloudflared) [ "$UPDATE_TUNNEL_RUNNING" != 1 ] || printf '%s\\n' old-tunnel ;;
     esac ;;
   build) [ "$UPDATE_FAIL" != build ] || exit 1 ;;
   run)
@@ -81,6 +84,7 @@ case "$action" in
   up)
     case "$*" in
       *--exit-code-from*) [ "$UPDATE_FAIL" != migrate ] || exit 1 ;;
+      *cloudflared*) [ "$UPDATE_FAIL" != tunnel ] || exit 1 ;;
       *) [ "$UPDATE_FAIL" != health ] || exit 1 ;;
     esac ;;
 esac
@@ -103,7 +107,13 @@ exit 0
     parent,
     git,
     state: join(root, '.git/srilanka-update-state'),
-    async run({ failure = '', worker = '0', pull = false } = {}) {
+    async run({
+      failure = '',
+      worker = '0',
+      tunnelProfile = '0',
+      tunnelRunning = '0',
+      pull = false,
+    } = {}) {
       const result = spawnSync(
         shell,
         [
@@ -123,6 +133,8 @@ exit 0
             UPDATE_LOG: posix(log),
             UPDATE_FAIL: failure,
             UPDATE_WORKER: worker,
+            UPDATE_TUNNEL_PROFILE: tunnelProfile,
+            UPDATE_TUNNEL_RUNNING: tunnelRunning,
           },
         },
       );
@@ -170,6 +182,36 @@ test(
     );
     assert.equal(f.git('status', '--porcelain'), '');
     assert.equal(existsSync(f.state), false);
+    assert.doesNotMatch(result.calls, /up .*cloudflared/);
+  },
+);
+
+test(
+  'starts an enabled tunnel after web health checks and preserves it on retry',
+  options,
+  async (t) => {
+    const f = await fixture(t);
+    const failed = await f.run({ failure: 'tunnel', tunnelProfile: '1' });
+    assert.notEqual(failed.status, 0);
+    assert.ok(
+      failed.calls.indexOf('--wait-timeout 180 api web') <
+        failed.calls.indexOf('up -d --no-deps cloudflared'),
+    );
+    const retry = await f.run();
+    assert.equal(retry.status, 0, retry.stderr);
+    assert.match(retry.calls, /--profile tunnel up -d --no-deps cloudflared/);
+    assert.equal(existsSync(f.state), false);
+  },
+);
+
+test(
+  'retains a running tunnel even when the profile was enabled only at startup',
+  options,
+  async (t) => {
+    const f = await fixture(t);
+    const result = await f.run({ tunnelRunning: '1' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.calls, /--profile tunnel up -d --no-deps cloudflared/);
   },
 );
 
