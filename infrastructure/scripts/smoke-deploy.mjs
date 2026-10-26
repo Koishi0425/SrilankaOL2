@@ -360,13 +360,14 @@ try {
     ]);
     assert.match(upgrade.stdout + upgrade.stderr, /deployment-backup-complete/);
     assert.match(upgrade.stdout + upgrade.stderr, /deployment-migrated/);
+    console.log('Image-only upgrade checkpoint verified.');
     const blocked = compose(
       [
         'run',
         '--rm',
         '--no-deps',
         '-e',
-        'BACKUP_DIRECTORY=/proc/srilanka-blocked',
+        'BACKUP_DIRECTORY=/app/package.json/srilanka-blocked',
         'migrate',
       ],
       { allowFailure: true },
@@ -374,9 +375,7 @@ try {
     assert.notEqual(blocked.status, 0);
     assert.match(blocked.stdout + blocked.stderr, /deployment-failed/);
     assert.doesNotMatch(blocked.stdout + blocked.stderr, /deployment-migrated/);
-    console.log(
-      'Image-only upgrade checkpoint and backup-failure migration guard verified.',
-    );
+    console.log('Backup-failure migration guard verified.');
   }
 
   compose(['restart', 'database', 'redis', 'api', 'web']);
