@@ -20,7 +20,8 @@ const imageTag =
   imageArgument < 0 ? `smoke-${token}` : process.argv[imageArgument + 1];
 if (!imageTag || !/^[a-zA-Z0-9_.-]+$/.test(imageTag))
   throw new Error('Invalid --image-tag.');
-const build = !process.argv.includes('--no-build');
+const registry = process.argv.includes('--registry');
+const build = !registry && !process.argv.includes('--no-build');
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -46,6 +47,8 @@ const environment = {
   HTTP_PORT: String(httpPort),
   HTTPS_PORT: String(httpsPort),
   IMAGE_TAG: imageTag,
+  IMAGE_NAMESPACE:
+    process.env.IMAGE_NAMESPACE || 'ghcr.io/koishi0425/srilankaol2',
   REGISTRATION_MODE: 'invite',
   BACKUP_ENABLED: 'true',
   BACKUP_INTERVAL_MINUTES: '60',
@@ -64,7 +67,7 @@ const args = [
   '--env-file',
   envFile,
   '-f',
-  join(root, 'compose.yaml'),
+  join(root, registry ? 'compose.ghcr.yaml' : 'compose.yaml'),
   '-p',
   project,
 ];
@@ -118,6 +121,15 @@ try {
     compose(['config', '--format', 'json']).stdout,
   );
   assert.ok(tunnelConfig.services.cloudflared);
+  if (registry) {
+    assert.ok(
+      Object.values(tunnelConfig.services).every((service) => !service.build),
+    );
+    assert.equal(
+      tunnelConfig.services.api.image,
+      tunnelConfig.services.migrate.image,
+    );
+  }
   assert.equal(tunnelConfig.services.cloudflared.profiles, undefined);
   assert.ok(
     tunnelConfig.services.web.ports.every(
@@ -336,6 +348,36 @@ try {
   console.log(
     'Backup creation, archive verification and restore into a new database verified.',
   );
+
+  if (registry) {
+    const upgrade = compose([
+      'up',
+      '--no-deps',
+      '--force-recreate',
+      '--exit-code-from',
+      'migrate',
+      'migrate',
+    ]);
+    assert.match(upgrade.stdout + upgrade.stderr, /deployment-backup-complete/);
+    assert.match(upgrade.stdout + upgrade.stderr, /deployment-migrated/);
+    const blocked = compose(
+      [
+        'run',
+        '--rm',
+        '--no-deps',
+        '-e',
+        'BACKUP_DIRECTORY=/proc/srilanka-blocked',
+        'migrate',
+      ],
+      { allowFailure: true },
+    );
+    assert.notEqual(blocked.status, 0);
+    assert.match(blocked.stdout + blocked.stderr, /deployment-failed/);
+    assert.doesNotMatch(blocked.stdout + blocked.stderr, /deployment-migrated/);
+    console.log(
+      'Image-only upgrade checkpoint and backup-failure migration guard verified.',
+    );
+  }
 
   compose(['restart', 'database', 'redis', 'api', 'web']);
   compose([

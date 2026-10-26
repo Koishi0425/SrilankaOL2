@@ -6,7 +6,28 @@
 
 政策按玩家与回合整份编写、一次提交、统一评阅；分项分类只作提示，可重复或自拟标题。旧记录自动汇总，详见[整份回合政策](docs/整份回合政策.md)。
 
-## Docker 部署
+## GHCR 镜像部署（NAS 推荐）
+
+NAS 可直接拉取 GitHub 构建好的镜像，无需本机安装构建工具或保存项目源码。使用 [compose.ghcr.yaml](compose.ghcr.yaml)，默认通过 Cloudflare Tunnel 开放网站：
+
+| 服务        | 镜像                                           |
+| ----------- | ---------------------------------------------- |
+| API、迁移   | `ghcr.io/koishi0425/srilankaol2-api:latest`    |
+| 网页        | `ghcr.io/koishi0425/srilankaol2-web:latest`    |
+| 可选 worker | `ghcr.io/koishi0425/srilankaol2-worker:latest` |
+
+首次将现有 NAS 项目切换到上述配置后，后续可直接在绿联 Docker 的项目管理中点击更新。保持原项目名、私有环境变量和数据卷；原来设置了 `IMAGE_TAG=local` 时改为 `latest`。迁移服务会在已有存档上先创建并校验备份，成功后执行待应用迁移，再启动 API 和网页。详细步骤及首次公开镜像设置见 [GHCR 与绿联 NAS 更新](docs/GHCR与绿联NAS更新.md)。
+
+主分支通过 CI 后自动构建 amd64、arm64 镜像，镜像拉取演练通过后才更新 `latest`。每次发布另保留 `sha-完整提交编号` 标签供固定版本使用。公开镜像可匿名拉取；首次发布时需在 GitHub Packages 将三个包设为 Public。
+
+命令行首次部署可使用下文的 `.env.docker` 配置，将 Compose 文件切换为：
+
+```sh
+docker compose --env-file .env.docker -f compose.ghcr.yaml pull
+docker compose --env-file .env.docker -f compose.ghcr.yaml up -d --wait --wait-timeout 180
+```
+
+## Docker 源码构建部署
 
 需要 Docker Engine / Docker Desktop（Linux 容器）和 Docker Compose v2.24 以上。部署机器无需安装 Node.js、pnpm 或 PostgreSQL。以下命令均在本 README 所在的仓库根目录执行。
 
@@ -194,6 +215,8 @@ docker compose --env-file .env.docker cp api:/app/backups/. ./backups/docker
 
 ### 更新和停止
 
+使用 GHCR 的 NAS 部署可直接更新整个项目镜像，见 [NAS 更新说明](docs/GHCR与绿联NAS更新.md)。下述脚本用于源码构建部署。
+
 首次部署完成后，在服务器仓库内执行一条命令即可更新：
 
 ```sh
@@ -291,6 +314,7 @@ node infrastructure/scripts/smoke-deploy.mjs
 | `packages/database`                   | PostgreSQL、迁移、备份与恢复          |
 | `packages/config` / `packages/logger` | 配置与日志                            |
 | `compose.yaml`                        | 完整部署环境                          |
+| `compose.ghcr.yaml`                   | NAS 与服务器直接拉取镜像的部署环境    |
 | `infrastructure/docker`               | Web、API 和 worker 镜像构建           |
 | `docs`                                | 当前实现约定、验收记录和设计资料      |
 

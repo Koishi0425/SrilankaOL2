@@ -1,0 +1,174 @@
+# Pull-only deployment for NAS panels. Keep the existing project name and volumes
+# when replacing a build-based Compose configuration. Update the whole project.
+name: srilankaol-deploy
+
+x-api-image: &api-image
+  image: ${IMAGE_NAMESPACE:-ghcr.io/koishi0425/srilankaol2}-api:${IMAGE_TAG:-latest}
+
+x-app-environment: &app-environment
+  NODE_ENV: ${APP_ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  HOST: 0.0.0.0
+  PORT: 3000
+  DATABASE_URL: postgresql://${POSTGRES_USER:-srilanka}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@database:5432/${POSTGRES_DB:-srilanka}
+  REDIS_URL: redis://redis:6379/0
+  WEB_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+  REGISTRATION_MODE: ${REGISTRATION_MODE:-invite}
+  # The API is private; Caddy is its only proxy and normalizes forwarded headers.
+  TRUST_PROXY_HOPS: 1
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+
+services:
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-srilanka}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}
+      POSTGRES_DB: ${POSTGRES_DB:-srilanka}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *logging
+
+  redis:
+    image: redis:8-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *logging
+
+  migrate:
+    <<: *api-image
+    environment:
+      <<: *app-environment
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_DIRECTORY: /app/backups
+      BACKUP_SOURCE_ROOT: /app
+    volumes:
+      - backup-data:/app/backups
+    command: ['node', 'packages/database/dist/deploy.js']
+    restart: 'no'
+    depends_on:
+      database:
+        condition: service_healthy
+    logging: *logging
+
+  api:
+    <<: *api-image
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      <<: *app-environment
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_DIRECTORY: /app/backups
+      BACKUP_SOURCE_ROOT: /app
+      BACKUP_INTERVAL_MINUTES: ${BACKUP_INTERVAL_MINUTES:-60}
+      BACKUP_KEEP: ${BACKUP_KEEP:-48}
+      LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_BASE_URL:
+      LLM_JSON_MODE: ${LLM_JSON_MODE:-true}
+      LLM_DISABLE_THINKING: ${LLM_DISABLE_THINKING:-true}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-60000}
+    volumes:
+      - backup-data:/app/backups
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/v1/health',{signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    logging: *logging
+
+  web:
+    image: ${IMAGE_NAMESPACE:-ghcr.io/koishi0425/srilankaol2}-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - '${WEB_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:80'
+      - '${WEB_BIND:-127.0.0.1}:${HTTPS_PORT:-8443}:443'
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '-q',
+          '-O',
+          '/dev/null',
+          'http://127.0.0.1:8081/healthz',
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    depends_on:
+      api:
+        condition: service_healthy
+    logging: *logging
+
+  # The default public entrypoint. Point the published application at
+  # http://web:8082; this trusted ingress is never host-published.
+  # Local/direct HTTPS trials can explicitly use --scale cloudflared=0.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command: ['tunnel', '--no-autoupdate', 'run']
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      web:
+        condition: service_healthy
+    logging: *logging
+
+  # No background game jobs currently depend on the worker baseline.
+  worker:
+    profiles: ['worker']
+    image: ${IMAGE_NAMESPACE:-ghcr.io/koishi0425/srilankaol2}-worker:${IMAGE_TAG:-latest}
+    init: true
+    restart: unless-stopped
+    environment: *app-environment
+    depends_on:
+      redis:
+        condition: service_healthy
+    logging: *logging
+
+volumes:
+  postgres-data:
+  redis-data:
+  backup-data:
+  caddy-data:
+  caddy-config:

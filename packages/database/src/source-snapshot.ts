@@ -31,6 +31,7 @@ const rootFiles = [
   '.env.example',
   '.env.docker.example',
   'compose.yaml',
+  'compose.ghcr.yaml',
   'README.md',
   'LICENSE',
   'LICENSE.md',
