@@ -248,6 +248,20 @@ try {
     'First-host bootstrap, repeat protection, login and game creation verified.',
   );
 
+  // Exercise backup verification with an archive larger than pipe buffers.
+  // A tiny empty game can hide pg_restore --list closing its input early.
+  exec(
+    'database',
+    'psql',
+    '-U',
+    'srilanka',
+    '-d',
+    environment.POSTGRES_DB,
+    '-v',
+    'ON_ERROR_STOP=1',
+    '-c',
+    "CREATE TABLE backup_stream_probe AS SELECT string_agg(md5(i::text), '') AS body FROM generate_series(1, 65536) i",
+  );
   const output = exec(
     'api',
     'node',
@@ -259,6 +273,19 @@ try {
     .filter(Boolean)
     .map((line) => JSON.parse(line))
     .find((line) => line.event === 'backup-complete').detail.path;
+  assert.ok(
+    Number(
+      exec(
+        'api',
+        'node',
+        '-e',
+        "console.log(require('node:fs').statSync(process.argv[1]).size)",
+        `${backup}/database.dump`,
+      ),
+    ) >
+      256 * 1024,
+    'The backup archive must exceed pipe buffers',
+  );
   exec(
     'api',
     'node',

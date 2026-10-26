@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createWriteStream } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 
 export interface PostgresTools {
@@ -91,58 +92,63 @@ export async function runPostgresTool(
       .filter(Boolean)
       .join(':');
   }
-  return new Promise<string>((resolve, reject) => {
-    const child = spawn(executable, command, {
-      env,
-      shell: false,
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString()).slice(-16_384);
-    });
-    const timeout = setTimeout(() => child.kill(), 10 * 60_000);
-    const completion = new Promise<void>((done, fail) => {
-      child.once('error', () =>
-        fail(new Error(`无法启动 ${tool}；请配置 PostgreSQL 客户端路径。`)),
-      );
-      child.once('close', (code) =>
-        code === 0
-          ? done()
-          : fail(
-              new Error(
-                `${tool} 失败：${redact(stderr || `退出状态 ${code}`, databaseUrl).trim()}`,
-              ),
-            ),
-      );
-    });
-    const output = files.output
-      ? pipeline(
-          child.stdout,
-          createWriteStream(files.output, { flags: 'wx', mode: 0o600 }),
-        )
-      : Promise.resolve();
-    if (!files.output)
-      child.stdout.on('data', (chunk: Buffer) => {
-        stdout = (stdout + chunk.toString()).slice(-64_000);
+  // pg_restore --list can finish after reading just the archive directory.
+  // Let the child read the file directly instead of pumping the remaining
+  // payload into a closed pipe and mistaking EPIPE for a failed verification.
+  const input = files.input ? await open(files.input, 'r') : undefined;
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const child = spawn(executable, command, {
+        env,
+        shell: false,
+        windowsHide: true,
+        stdio: [input?.fd ?? 'ignore', 'pipe', 'pipe'],
       });
-    const input = files.input
-      ? pipeline(createReadStream(files.input), child.stdin)
-      : Promise.resolve(child.stdin.end());
-    Promise.all([completion, input, output])
-      .then(
-        () => resolve(stdout),
-        (error: unknown) => {
-          child.kill();
-          reject(
-            error instanceof Error
-              ? new Error(redact(error.message, databaseUrl))
-              : new Error(`${tool} 执行失败。`),
-          );
-        },
-      )
-      .finally(() => clearTimeout(timeout));
-  });
+      let stdout = '';
+      let stderr = '';
+      child.stderr!.on('data', (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString()).slice(-16_384);
+      });
+      const timeout = setTimeout(() => child.kill(), 10 * 60_000);
+      const completion = new Promise<void>((done, fail) => {
+        child.once('error', () =>
+          fail(new Error(`无法启动 ${tool}；请配置 PostgreSQL 客户端路径。`)),
+        );
+        child.once('close', (code) =>
+          code === 0
+            ? done()
+            : fail(
+                new Error(
+                  `${tool} 失败：${redact(stderr || `退出状态 ${code}`, databaseUrl).trim()}`,
+                ),
+              ),
+        );
+      });
+      const output = files.output
+        ? pipeline(
+            child.stdout!,
+            createWriteStream(files.output, { flags: 'wx', mode: 0o600 }),
+          )
+        : Promise.resolve();
+      if (!files.output)
+        child.stdout!.on('data', (chunk: Buffer) => {
+          stdout = (stdout + chunk.toString()).slice(-64_000);
+        });
+      Promise.all([completion, output])
+        .then(
+          () => resolve(stdout),
+          (error: unknown) => {
+            child.kill();
+            reject(
+              error instanceof Error
+                ? new Error(redact(error.message, databaseUrl))
+                : new Error(`${tool} 执行失败。`),
+            );
+          },
+        )
+        .finally(() => clearTimeout(timeout));
+    });
+  } finally {
+    await input?.close();
+  }
 }

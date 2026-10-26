@@ -43,6 +43,10 @@ it('restores an exact snapshot into a new database and refuses corruption or an 
     await database.query(`CREATE TABLE schema_migrations (name text PRIMARY KEY, checksum text NOT NULL);
       CREATE TABLE policies (id integer PRIMARY KEY, secret text NOT NULL, treasury numeric NOT NULL, payload jsonb NOT NULL);
       INSERT INTO policies VALUES (1, '仅主持人可见：秘密会谈', 1234.56, '{"terrain":"丘陵","strength":980}');`);
+    // pg_restore --list stops before the data payload. Keep the archive larger
+    // than pipe buffers so verification exercises that early-exit behavior.
+    await database.query(`CREATE TABLE backup_payload AS
+      SELECT string_agg(md5(i::text), '') AS body FROM generate_series(1, 65536) i`);
     await mkdir(sourceRoot);
     await writeFile(join(sourceRoot, 'package.json'), '{}');
     await writeFile(join(sourceRoot, 'pnpm-lock.yaml'), 'lockfileVersion: 9');
@@ -53,6 +57,7 @@ it('restores an exact snapshot into a new database and refuses corruption or an 
       tools,
     };
     const backup = await createBackup(options);
+    expect(backup.manifest.archive.bytes).toBeGreaterThan(256 * 1024);
     expect(
       backup.manifest.tables.find((table) => table.table === 'policies')?.rows,
     ).toBe(1);
