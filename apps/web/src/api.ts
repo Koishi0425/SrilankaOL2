@@ -2,6 +2,9 @@ import type {
   AssistantStatus,
   AssistantInput,
   AssistantResult,
+  GlobalAssistantSettings,
+  SaveGlobalAssistantSettings,
+  AssistantConnectionTest,
   ActionCategory,
   AuthOptions,
   AccountAccessCode,
@@ -65,6 +68,27 @@ import type {
 } from '@srilanka/contracts';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
+
+export async function fetchGlobalAssistantSettings() {
+  return (await apiRequest<GlobalAssistantSettings>('/admin/assistant')).data;
+}
+export async function saveGlobalAssistantSettings(
+  input: SaveGlobalAssistantSettings,
+) {
+  return (
+    await apiRequest<GlobalAssistantSettings>('/admin/assistant', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    })
+  ).data;
+}
+export async function testGlobalAssistantConnection() {
+  return (
+    await apiRequest<AssistantConnectionTest>('/admin/assistant/test', {
+      method: 'POST',
+    })
+  ).data;
+}
 
 export async function fetchAssistantStatus(
   gameId: string,

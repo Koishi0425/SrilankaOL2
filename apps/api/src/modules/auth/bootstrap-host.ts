@@ -34,7 +34,7 @@ export async function bootstrapHost(database: DatabasePool, input: unknown) {
     }
     const id = randomUUID();
     await client.query(
-      'INSERT INTO users (id,username,display_name,password_hash) VALUES ($1,LOWER($2),$3,$4)',
+      "INSERT INTO users (id,username,display_name,password_hash,system_role) VALUES ($1,LOWER($2),$3,$4,'Administrator')",
       [id, user.username, user.displayName, passwordHash],
     );
     await client.query('COMMIT');

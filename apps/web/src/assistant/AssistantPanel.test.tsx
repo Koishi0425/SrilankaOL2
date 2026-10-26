@@ -54,6 +54,49 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('compact settlement assistance', () => {
+  it('separates outcomes, costs and pending items and opens cited original sources', async () => {
+    vi.mocked(generateAssistantResult).mockResolvedValue({
+      ...result,
+      answer: {
+        ...result.answer,
+        highlights: [
+          {
+            title: '探索行动',
+            category: 'Outcome',
+            text: '探索队已经返回。',
+            sourceIds: ['report'],
+          },
+          {
+            title: '行动支出',
+            category: 'Cost',
+            text: '本次损失20国库。',
+            sourceIds: ['report'],
+          },
+          {
+            title: '新航线',
+            category: 'Pending',
+            text: '尚未完成测绘。',
+            sourceIds: ['report'],
+          },
+        ],
+      },
+    });
+    render(<AssistantPanel gameId="game" input={input} contextKey="v2" />);
+    fireEvent.click(screen.getByRole('button', { name: '结算速览' }));
+    fireEvent.click(await screen.findByRole('button', { name: '生成速览' }));
+    await screen.findByRole('region', { name: '代价与损失' });
+    expect(screen.getByRole('region', { name: '实际结果' })).toHaveTextContent(
+      '探索队已经返回',
+    );
+    expect(
+      screen.getByRole('region', { name: '尚未完成与待确认' }),
+    ).toHaveTextContent('尚未完成测绘');
+    fireEvent.click(screen.getAllByRole('button', { name: '回合公告' })[0]!);
+    expect(screen.getByText('核对原文').closest('details')).toHaveAttribute(
+      'open',
+    );
+    expect(screen.getByRole('button', { name: '复制速览' })).toBeEnabled();
+  });
   it('does not load or generate until requested, then shows short results, exact totals and original sources', async () => {
     render(<AssistantPanel gameId="game" input={input} contextKey="v2" />);
     expect(fetchAssistantStatus).not.toHaveBeenCalled();

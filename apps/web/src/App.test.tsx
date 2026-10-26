@@ -45,6 +45,7 @@ describe('App', () => {
     });
     render(<App />);
     expect(await screen.findByText('当前玩家')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '全局 AI 设置' })).toBeNull();
     expired = true;
     await act(async () => {
       await expect(fetchMe()).rejects.toThrow();

@@ -4,6 +4,7 @@ import { ApiFault } from '../../errors.js';
 import { requireUser } from '../auth/auth-routes.js';
 import type { AuthService } from '../auth/auth-service.js';
 import type { AssistantService } from './assistant-service.js';
+import { globalAssistantInputSchema } from './assistant-settings.js';
 
 const paramsSchema = z.object({ gameId: z.string().uuid() });
 const settingsSchema = z
@@ -45,6 +46,37 @@ export async function registerAssistantRoutes(
   auth: AuthService,
   assistant: AssistantService,
 ) {
+  if (assistant.settings) {
+    const settings = assistant.settings;
+    app.get('/api/v1/admin/assistant', async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      if (!user) return reply;
+      return {
+        data: await settings.get(user.id),
+        meta: { requestId: request.id },
+      };
+    });
+    app.put(
+      '/api/v1/admin/assistant',
+      { bodyLimit: 14000 },
+      async (request, reply) => {
+        const user = await requireUser(request, reply, auth);
+        if (!user) return reply;
+        const input = parse(globalAssistantInputSchema, request.body);
+        return {
+          data: await settings.save(user.id, input),
+          meta: { requestId: request.id },
+        };
+      },
+    );
+    app.post('/api/v1/admin/assistant/test', async (request, reply) => {
+      const user = await requireUser(request, reply, auth);
+      if (!user) return reply;
+      const data = await settings.test(user.id);
+      if (!(await requireUser(request, reply, auth))) return reply;
+      return { data, meta: { requestId: request.id } };
+    });
+  }
   app.get('/api/v1/games/:gameId/assistant', async (request, reply) => {
     const user = await requireUser(request, reply, auth);
     if (!user) return reply;

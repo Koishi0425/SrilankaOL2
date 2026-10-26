@@ -14,6 +14,7 @@ import { NewGameForm } from './workspace/NewGameForm.js';
 import { DraftAccountProvider } from './drafts/local-drafts.js';
 import { gameStatusNames, roleNames, seasonNames } from './game-labels.js';
 import { LoginPanel, PasswordPanel } from './accounts/AccountPanels.js';
+import { GlobalAssistantSettings } from './assistant/GlobalAssistantSettings.js';
 
 type SessionState =
   | { kind: 'loading' }
@@ -150,6 +151,7 @@ function Dashboard({ me }: { me: MeData }) {
 export function App() {
   const [session, setSession] = useState<SessionState>({ kind: 'loading' });
   const [accountOpen, setAccountOpen] = useState(false);
+  const [globalAssistantOpen, setGlobalAssistantOpen] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [sessionError, setSessionError] = useState('');
   const [signingOut, setSigningOut] = useState(false);
@@ -195,6 +197,7 @@ export function App() {
       beginSession();
       setSessionExpired(false);
       setAccountOpen(false);
+      setGlobalAssistantOpen(false);
       setSession({ kind: 'guest' });
     } catch (reason) {
       setSessionError(
@@ -212,6 +215,17 @@ export function App() {
           <h1>SrilankaOL</h1>
         </div>
         <div className="header-actions">
+          {session.kind === 'ready' &&
+            session.me.systemRole === 'Administrator' && (
+              <button
+                className="button button--quiet global-assistant-trigger"
+                type="button"
+                aria-expanded={globalAssistantOpen}
+                onClick={() => setGlobalAssistantOpen((value) => !value)}
+              >
+                全局 AI 设置
+              </button>
+            )}
           {session.kind === 'ready' && (
             <span className="current-user">{session.me.displayName}</span>
           )}
@@ -267,6 +281,13 @@ export function App() {
       {session.kind === 'guest' && (
         <LoginPanel message={session.message} onSuccess={loadSession} />
       )}
+      {session.kind === 'ready' &&
+        session.me.systemRole === 'Administrator' &&
+        globalAssistantOpen && (
+          <GlobalAssistantSettings
+            onClose={() => setGlobalAssistantOpen(false)}
+          />
+        )}
       {session.kind === 'ready' && <Dashboard me={session.me} />}
       {session.kind === 'ready' && accountOpen && (
         <PasswordPanel

@@ -247,6 +247,10 @@ try {
     (await (await request('/api/v1/me')).json()).data.username,
     user.username,
   );
+  assert.equal(
+    (await (await request('/api/v1/me')).json()).data.systemRole,
+    'Administrator',
+  );
   const gameResponse = await request(
     '/api/v1/games',
     jsonBody({ name: 'Docker 独立部署演练', countryNames: ['河谷', '海岸'] }),
@@ -254,6 +258,32 @@ try {
   assert.equal(gameResponse.status, 201);
   const game = (await gameResponse.json()).data;
   assert.ok(game.id);
+  const privateModelKey = `smoke-private-${token}`;
+  const modelConfiguration = await request('/api/v1/admin/assistant', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      expectedRevision: 0,
+      enabled: true,
+      provider: 'compatible',
+      baseUrl: 'https://model.invalid/v1/chat/completions',
+      model: 'smoke-model',
+      apiKey: privateModelKey,
+      jsonMode: true,
+      disableThinking: false,
+      timeoutMs: 60000,
+    }),
+  });
+  assert.equal(modelConfiguration.status, 200);
+  const modelSettings = (await modelConfiguration.json()).data;
+  assert.equal(modelSettings.configured, true);
+  assert.equal(modelSettings.baseUrl, 'https://model.invalid/v1');
+  assert.ok(!JSON.stringify(modelSettings).includes(privateModelKey));
+  assert.equal(
+    (await (await request(`/api/v1/games/${game.id}/assistant`)).json()).data
+      .scope,
+    'Global',
+  );
   assert.equal(exec('api', 'id', '-u').trim(), '1000');
   assert.match(exec('api', 'pg_dump', '--version'), /PostgreSQL\)?\s+17\./);
   console.log(
@@ -390,6 +420,16 @@ try {
   ]);
   const games = (await (await request('/api/v1/games')).json()).data;
   assert.ok(games.some((item) => item.id === game.id));
+  const persistedModel = (
+    await (await request('/api/v1/admin/assistant')).json()
+  ).data;
+  assert.equal(persistedModel.configured, true);
+  assert.equal(persistedModel.hasApiKey, true);
+  assert.equal(persistedModel.model, 'smoke-model');
+  assert.ok(!JSON.stringify(persistedModel).includes(privateModelKey));
+  console.log(
+    'Administrator-only global AI configuration and encrypted credential persistence verified without external model calls.',
+  );
   exec('web', 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile');
   compose([
     'exec',

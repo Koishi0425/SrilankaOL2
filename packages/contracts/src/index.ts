@@ -1420,6 +1420,41 @@ export interface AssistantStatus {
   enabled: boolean;
   canManage: boolean;
   provider: string;
+  scope?: 'Global';
+  model?: string;
+}
+
+export interface GlobalAssistantSettings {
+  revision: number;
+  enabled: boolean;
+  configured: boolean;
+  provider: 'deepseek' | 'glm' | 'compatible';
+  baseUrl: string;
+  model: string;
+  hasApiKey: boolean;
+  jsonMode: boolean;
+  disableThinking: boolean;
+  timeoutMs: number;
+  source: 'Database' | 'Environment';
+  updatedAt: string | null;
+}
+
+export interface SaveGlobalAssistantSettings {
+  expectedRevision: number;
+  enabled: boolean;
+  provider: GlobalAssistantSettings['provider'];
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  jsonMode: boolean;
+  disableThinking: boolean;
+  timeoutMs: number;
+}
+
+export interface AssistantConnectionTest {
+  provider: string;
+  model: string;
+  latencyMs: number;
 }
 
 export interface AssistantInput {
@@ -1440,7 +1475,12 @@ export interface AssistantSource {
 
 export interface AssistantAnswer {
   overview: string;
-  highlights: Array<{ text: string; sourceIds: string[] }>;
+  highlights: Array<{
+    title?: string;
+    category?: 'Outcome' | 'Cost' | 'Pending' | 'Correction';
+    text: string;
+    sourceIds: string[];
+  }>;
   notices: string[];
   draft: string | null;
 }

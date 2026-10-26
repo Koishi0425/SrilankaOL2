@@ -12,6 +12,7 @@ import { ApiFault } from '../../errors.js';
 import type { GameService } from '../games/game-service.js';
 import type { SettlementService } from '../settlements/settlement-service.js';
 import type { AssistantModel, ModelRequest } from './assistant-model.js';
+import type { AssistantSettingsService } from './assistant-settings.js';
 
 const hash = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -25,16 +26,29 @@ export class AssistantService {
     private readonly games: GameService,
     private readonly settlements: SettlementService,
     private readonly model: AssistantModel,
+    readonly settings?: AssistantSettingsService,
   ) {}
+
+  private async runtime() {
+    return this.settings
+      ? this.settings.runtime()
+      : { model: this.model, globalEnabled: null, revision: 0, modelName: '' };
+  }
 
   async status(gameId: string, userId: string): Promise<AssistantStatus> {
     const game = await this.games.getForUser(gameId, userId);
+    const runtime = await this.runtime();
     return {
-      configured: this.model.configured,
-      enabled: game.aiEnabled,
+      configured: runtime.model.configured,
+      enabled: runtime.globalEnabled ?? game.aiEnabled,
       canManage:
-        hostRole(game.role) && !['Archived', 'Completed'].includes(game.status),
-      provider: this.model.provider,
+        runtime.globalEnabled === null &&
+        hostRole(game.role) &&
+        !['Archived', 'Completed'].includes(game.status),
+      provider: runtime.model.provider,
+      ...(runtime.globalEnabled !== null
+        ? { scope: 'Global' as const, model: runtime.modelName }
+        : {}),
     };
   }
 
@@ -45,6 +59,12 @@ export class AssistantService {
     expectedEnabled: boolean,
   ) {
     const status = await this.status(gameId, userId);
+    if (status.scope === 'Global')
+      throw new ApiFault(
+        409,
+        'ASSISTANT_GLOBAL_MANAGED',
+        '本局使用全站 AI 配置，请系统管理员通过全局 AI 设置调整。',
+      );
     if (!status.canManage)
       throw new ApiFault(
         403,
@@ -55,7 +75,7 @@ export class AssistantService {
       throw new ApiFault(
         503,
         'ASSISTANT_NOT_CONFIGURED',
-        '模型服务尚未配置，请维护者设置服务端环境变量。',
+        '模型服务尚未配置，请系统管理员设置全局 AI 服务。',
       );
     const result = await this.database.query(
       `UPDATE games g SET ai_enabled=$3 WHERE g.id=$1 AND g.ai_enabled=$4
@@ -75,17 +95,20 @@ export class AssistantService {
 
   private async context(gameId: string, userId: string, input: AssistantInput) {
     const game = await this.games.getForUser(gameId, userId);
-    if (!game.aiEnabled)
+    const runtime = await this.runtime();
+    if (!(runtime.globalEnabled ?? game.aiEnabled))
       throw new ApiFault(
         409,
         'ASSISTANT_DISABLED',
-        '主持人尚未开启本局的模型辅助。',
+        runtime.globalEnabled === false
+          ? '系统管理员已停用全站 AI 服务。'
+          : '主持人尚未开启本局的模型辅助。',
       );
-    if (!this.model.configured)
+    if (!runtime.model.configured)
       throw new ApiFault(
         503,
         'ASSISTANT_NOT_CONFIGURED',
-        '模型服务尚未配置，请联系维护者。',
+        '模型服务尚未配置，请联系系统管理员。',
       );
     if (input.purpose === 'Feedback' && !hostRole(game.role))
       throw new ApiFault(
@@ -316,7 +339,19 @@ export class AssistantService {
     return {
       sources,
       resourceTotals,
+      model: runtime.model,
+      modelContext: {
+        gameName: game.name,
+        quarter: `第${data.quarter.gameYear}年${{ Spring: '春季', Summer: '夏季', Autumn: '秋季', Winter: '冬季' }[data.quarter.season]}`,
+        audience: hostRole(game.role)
+          ? '主持人：仅归纳本次提供的资料'
+          : game.role === 'Player'
+            ? '玩家：仅归纳其可见的结果'
+            : '旁观者：仅归纳公开结果',
+      },
       fingerprint: hash([
+        runtime.revision,
+        runtime.globalEnabled,
         initialAudience,
         data.version,
         data.corrections,
@@ -376,8 +411,10 @@ export class AssistantService {
         purpose: input.purpose,
         length: input.length,
         sources: context.sources,
+        context: context.modelContext,
+        resourceTotals: context.resourceTotals,
       };
-      const answer = await this.model.generate(request);
+      const answer = await context.model.generate(request);
       // No database connection/transaction is held during network inference.
       const latest = await this.context(gameId, userId, input);
       if (latest.fingerprint !== context.fingerprint)

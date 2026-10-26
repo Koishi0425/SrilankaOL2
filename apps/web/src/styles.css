@@ -3345,3 +3345,63 @@ select:focus-visible {
   color: #637064;
   font-size: 0.88rem;
 }
+.global-assistant-settings {
+  width: min(900px, calc(100% - 24px));
+  margin: auto;
+  max-height: 90dvh;
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8f9f5;
+  box-sizing: border-box;
+}
+.global-assistant-settings::backdrop {
+  background: #182b3c66;
+}
+.header-actions:has(.global-assistant-trigger) {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.assistant-settings-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.global-assistant-settings fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.8rem;
+}
+.global-assistant-settings label {
+  display: grid;
+  gap: 0.35rem;
+}
+.global-assistant-settings input:not([type='checkbox']),
+.global-assistant-settings select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.global-assistant-settings .assistant-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.global-assistant-settings details > label {
+  margin-block: 0.7rem;
+}
+.assistant-highlight-group h4 {
+  margin: 0 0 0.4rem;
+}
+.assistant-source-link {
+  border: 0;
+  background: transparent;
+  color: #37604d;
+  text-decoration: underline;
+  padding: 0.15rem 0.3rem;
+  font: inherit;
+}

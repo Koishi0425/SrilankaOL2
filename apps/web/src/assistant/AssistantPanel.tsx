@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type {
   AssistantInput,
   AssistantResult,
@@ -16,6 +16,23 @@ export function AssistantSettings({ gameId }: { gameId: string }) {
   const [status, setStatus] = useState<AssistantStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    const refresh = () => {
+      void fetchAssistantStatus(gameId)
+        .then(setStatus)
+        .catch(() => undefined);
+    };
+    window.addEventListener('srilanka-assistant-settings-changed', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener(
+        'srilanka-assistant-settings-changed',
+        refresh,
+      );
+      window.removeEventListener('focus', refresh);
+    };
+  }, [gameId, open]);
   async function load() {
     setOpen(true);
     setBusy(true);
@@ -64,12 +81,19 @@ export function AssistantSettings({ gameId }: { gameId: string }) {
                 结算速览与反馈起草 · {status.provider} ·{' '}
                 {status.enabled ? '本局已开启' : '本局未开启'}
               </p>
+              {status.scope === 'Global' && (
+                <p>
+                  由系统管理员统一配置 · {status.model}
+                  。所有游戏共用，无需逐局开启。
+                </p>
+              )}
               <p>
                 点击生成时，相关文字会发送至所配置的模型服务。玩家仅发送其可见的已发布结果。
               </p>
               {!status.configured && (
                 <p>
-                  模型服务尚未配置，请维护者按项目说明设置服务端密钥和模型名称。
+                  模型服务尚未配置，请系统管理员通过页面顶部的“全局 AI
+                  设置”填写地址、API Key 和模型名称。
                 </p>
               )}
               {status.canManage && (
@@ -118,6 +142,9 @@ export function AssistantPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [copyMessage, setCopyMessage] = useState('');
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const sourcesId = useId();
   const [result, setResult] = useState<{
     value: AssistantResult;
     basis: string;
@@ -127,6 +154,23 @@ export function AssistantPanel({
   const controller = useRef<AbortController | null>(null);
   const basis = JSON.stringify([gameId, input, contextKey, ruling, length]);
   const stale = !!result && result.basis !== basis;
+  useEffect(() => {
+    if (!open) return;
+    const refresh = () => {
+      void fetchAssistantStatus(gameId)
+        .then(setStatus)
+        .catch(() => undefined);
+    };
+    window.addEventListener('srilanka-assistant-settings-changed', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener(
+        'srilanka-assistant-settings-changed',
+        refresh,
+      );
+      window.removeEventListener('focus', refresh);
+    };
+  }, [gameId, open]);
   useEffect(
     () => () => {
       generation.current += 1;
@@ -150,6 +194,7 @@ export function AssistantPanel({
     setBusy(true);
     setError('');
     setMessage('');
+    setCopyMessage('');
     setResult(null);
     const current = ++generation.current;
     controller.current = new AbortController();
@@ -263,7 +308,10 @@ export function AssistantPanel({
                       资料或输入已变化，请重新生成。此内容仅供核对。
                     </p>
                   )}
-                  <p>{result.value.answer.overview}</p>
+                  <div className="assistant-overview">
+                    <strong>本回合概况</strong>
+                    <p className="rules-text">{result.value.answer.overview}</p>
+                  </div>
                   {!!result.value.resourceTotals.length && (
                     <table>
                       <caption>本回合已入账收支（含更正，由账目汇总）</caption>
@@ -285,25 +333,54 @@ export function AssistantPanel({
                       </tbody>
                     </table>
                   )}
-                  {!!result.value.answer.highlights.length && (
-                    <ul>
-                      {result.value.answer.highlights.map((item, index) => (
-                        <li key={index}>
-                          {item.text}
-                          <span className="assistant-source-label">
-                            {item.sourceIds
-                              .map(
-                                (id) =>
-                                  result.value.sources.find(
-                                    (source) => source.id === id,
-                                  )?.label,
-                              )
-                              .join('；')}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  {(
+                    [
+                      ['Outcome', '实际结果'],
+                      ['Cost', '代价与损失'],
+                      ['Pending', '尚未完成与待确认'],
+                      ['Correction', '更正记录'],
+                    ] as const
+                  ).map(([category, title]) => {
+                    const items = result.value.answer.highlights.filter(
+                      (item) => (item.category ?? 'Outcome') === category,
+                    );
+                    if (!items.length) return null;
+                    return (
+                      <section
+                        className="assistant-highlight-group"
+                        aria-label={title}
+                        key={category}
+                      >
+                        <h4>{title}</h4>
+                        <ul>
+                          {items.map((item, index) => (
+                            <li key={index}>
+                              {item.title && <strong>{item.title}</strong>}
+                              <p className="rules-text">{item.text}</p>
+                              <span className="assistant-source-label">
+                                依据：
+                                {[...new Set(item.sourceIds)].map((id) => (
+                                  <button
+                                    type="button"
+                                    className="assistant-source-link"
+                                    key={id}
+                                    aria-controls={sourcesId}
+                                    onClick={() => setSourcesOpen(true)}
+                                  >
+                                    {
+                                      result.value.sources.find(
+                                        (source) => source.id === id,
+                                      )?.label
+                                    }
+                                  </button>
+                                ))}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    );
+                  })}
                   {!!result.value.answer.notices.length && (
                     <div>
                       <strong>资料说明</strong>
@@ -338,7 +415,45 @@ export function AssistantPanel({
                       )}
                     </>
                   )}
-                  <details>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const answer = result.value.answer;
+                      const text =
+                        feedback && answer.draft
+                          ? answer.draft
+                          : [
+                              answer.overview,
+                              ...answer.highlights.map(
+                                (item) =>
+                                  `${item.title ? item.title + '：' : ''}${item.text}`,
+                              ),
+                              ...answer.notices,
+                            ].join('\n\n');
+                      if (!navigator.clipboard) {
+                        setCopyMessage(
+                          '当前浏览器不支持复制，请手动选择文字复制。',
+                        );
+                        return;
+                      }
+                      void navigator.clipboard
+                        .writeText(text)
+                        .then(() => setCopyMessage('已复制。'))
+                        .catch(() =>
+                          setCopyMessage('复制失败，请手动选择文字复制。'),
+                        );
+                    }}
+                  >
+                    {feedback ? '复制反馈草稿' : '复制速览'}
+                  </button>
+                  {copyMessage && <p role="status">{copyMessage}</p>}
+                  <details
+                    id={sourcesId}
+                    open={sourcesOpen}
+                    onToggle={(event) =>
+                      setSourcesOpen(event.currentTarget.open)
+                    }
+                  >
                     <summary>核对原文</summary>
                     {result.value.sources.map((source) => (
                       <div key={source.id}>

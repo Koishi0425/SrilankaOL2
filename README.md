@@ -248,7 +248,9 @@ docker compose --env-file .env.docker exec api node apps/api/dist/reset-account.
 
 ### 可选模型辅助
 
-在私有 `.env.docker` 中填写 `LLM_PROVIDER=deepseek` 或 `glm`、相应密钥和模型名称，重建 API 后由主持人在“剧本与规则”开启本局辅助。兼容接口还需填写 `LLM_BASE_URL`，不要包含 `/chat/completions`。
+系统管理员可在页面顶部的“全局 AI 设置”填写调用地址、API Key 和模型名称，保存启用后所有游戏和玩家立即共用，无需重启或修改 NAS 环境变量。支持 DeepSeek、GLM 和 OpenAI 兼容端点，并提供已保存配置的连接测试。只有系统管理员可修改，密钥加密保存且不回显。
+
+原 `.env.docker` 中的 `LLM_*` 配置继续作为尚未保存网页全局设置时的兼容方式。
 
 密钥只在服务器使用，不以 `VITE_` 开头，不进入网页包。用途、长度和权限限制见 [模型辅助说明](docs/模型辅助配置与使用.md)。
 

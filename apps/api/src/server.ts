@@ -14,6 +14,8 @@ import { buildApp } from './app.js';
 import { ApiFault } from './errors.js';
 import { CompatibleAssistantModel } from './modules/assistant/assistant-model.js';
 import { AssistantService } from './modules/assistant/assistant-service.js';
+import { AssistantSecrets } from './modules/assistant/assistant-secrets.js';
+import { AssistantSettingsService } from './modules/assistant/assistant-settings.js';
 import { ActionService } from './modules/actions/action-service.js';
 import { AuthService } from './modules/auth/auth-service.js';
 import { CommunicationService } from './modules/communications/communication-service.js';
@@ -75,6 +77,16 @@ const assistant = new AssistantService(
   games,
   settlements,
   new CompatibleAssistantModel(config.llm),
+  new AssistantSettingsService(
+    database,
+    new AssistantSecrets(
+      resolve(
+        process.env.BACKUP_DIRECTORY || resolve(sourceRoot, 'backups'),
+        '.private/assistant.key',
+      ),
+    ),
+    config.llm,
+  ),
 );
 let redisConnection: Promise<void> | undefined;
 

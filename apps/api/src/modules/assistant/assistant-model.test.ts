@@ -121,6 +121,50 @@ describe('model adapter and bounded output', () => {
       expanded,
     );
   });
+  it('accepts categorized factual highlights and sends game context and verified totals as data', async () => {
+    const structured = {
+      ...answer,
+      highlights: [
+        {
+          title: '港口工程',
+          category: 'Pending',
+          text: '港口尚未完成。',
+          sourceIds: ['report'],
+        },
+      ],
+    };
+    const fetcher = transport(JSON.stringify(structured));
+    const context = {
+      gameName: '测试剧本',
+      quarter: '第1年春季',
+      audience: '玩家：仅本国已发布结果',
+    };
+    const totals = [
+      { countryName: '河国', resource: 'Treasury' as const, amount: -20 },
+    ];
+    expect(
+      await new CompatibleAssistantModel(configuration(), fetcher).generate({
+        ...request,
+        context,
+        resourceTotals: totals,
+      }),
+    ).toEqual(structured);
+    const body = JSON.parse(String(fetcher.mock.calls[0]![1]!.body));
+    expect(JSON.parse(body.messages[1].content)).toMatchObject({
+      context,
+      confirmedResourceTotals: totals,
+    });
+    expect(body.messages[0].content).toContain('同一事件只归纳一次');
+    expect(() =>
+      parseModelAnswer(
+        JSON.stringify({
+          ...structured,
+          highlights: [{ ...structured.highlights[0], category: 'Strategy' }],
+        }),
+        request,
+      ),
+    ).toThrow();
+  });
   it('allows a feedback conflict to withhold the draft', () => {
     const feedback = { ...request, purpose: 'Feedback' as const };
     expect(
