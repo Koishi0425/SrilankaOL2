@@ -3405,3 +3405,93 @@ select:focus-visible {
   padding: 0.15rem 0.3rem;
   font: inherit;
 }
+
+/* Keep feedback brief and opt in to motion only when the user allows it.
+   Animate opacity/translation, never map geometry or panel dimensions. */
+@media (prefers-reduced-motion: no-preference) {
+  :root {
+    --motion-fast: 120ms;
+    --motion-enter: 180ms;
+    --motion-ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+
+  button,
+  .button {
+    transition:
+      background-color var(--motion-fast) ease-out,
+      border-color var(--motion-fast) ease-out,
+      color var(--motion-fast) ease-out,
+      box-shadow var(--motion-fast) ease-out,
+      opacity var(--motion-fast) ease-out,
+      translate var(--motion-fast) var(--motion-ease);
+  }
+
+  button:active:not(:disabled),
+  .button:active:not(:disabled) {
+    translate: 0 1px;
+    transition-duration: 60ms;
+  }
+
+  input,
+  textarea,
+  select {
+    transition:
+      border-color var(--motion-fast) ease-out,
+      background-color var(--motion-fast) ease-out,
+      box-shadow var(--motion-fast) ease-out;
+  }
+
+  :is(.account-panel, .global-assistant-settings)[open] {
+    animation: interaction-rise 200ms var(--motion-ease);
+  }
+
+  :is(.account-panel, .global-assistant-settings)[open]::backdrop {
+    animation: interaction-fade var(--motion-enter) ease-out;
+  }
+
+  .workspace-drawer:not([hidden]),
+  .workspace-drawer__content > div:not([hidden]),
+  .tile-panel,
+  .map-setup-panel,
+  .turn-overview,
+  details[open]:not([data-expanded='true']) > :not(summary) {
+    animation: interaction-fade var(--motion-enter) ease-out;
+  }
+
+  .message-bubble,
+  .round-policy-section,
+  .assistant-body,
+  .assistant-result,
+  .save-message,
+  .form-error,
+  .session-notice,
+  .draft-message-notice {
+    animation: interaction-rise var(--motion-enter) var(--motion-ease);
+  }
+}
+
+@keyframes interaction-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes interaction-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-split-handle::after {
+    transition: none;
+  }
+}
