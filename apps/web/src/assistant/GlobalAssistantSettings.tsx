@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { GlobalAssistantSettings as Settings } from '@srilanka/contracts';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 import {
   fetchGlobalAssistantSettings,
   saveGlobalAssistantSettings,
@@ -116,7 +117,7 @@ export function GlobalAssistantSettings({ onClose }: { onClose: () => void }) {
       <p>
         仅系统管理员可修改。保存并启用后，所有游戏中的玩家共用此服务；每次调用仍只发送该玩家有权查看的资料。
       </p>
-      {loading && <p>正在读取配置…</p>}
+      {loading && !draft && <LoadingSkeleton label="正在读取配置…" />}
       {error && (
         <p role="alert" className="form-error">
           {error}

@@ -20,6 +20,7 @@ import {
 import { quarterLabel } from '../diplomacy/DiplomacyEditor.js';
 import { economicNames } from '../settlements/EconomicBillPanel.js';
 import { signedAmount } from './resource-labels.js';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 
 function selectCountry(
   data: GovernmentData,
@@ -146,7 +147,7 @@ export function GovernmentPanel({
             </p>
           )}
           {message && <p role="status">{message}</p>}
-          {!current && <p>加载中…</p>}
+          {!current && !error && <LoadingSkeleton label="正在读取行政资料…" />}
           {current &&
             (editing ? (
               <>

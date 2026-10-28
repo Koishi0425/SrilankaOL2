@@ -101,6 +101,66 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it('shows policy placeholders until the initial document arrives, then removes them on success or failure', async () => {
+  let resolve!: (policy: RoundPolicy) => void;
+  vi.mocked(api.fetchMyRoundPolicy).mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  render(<RoundPolicyCenter game={game} />);
+  expect(
+    screen.getByRole('status', { name: '正在读取本回合政策…' }),
+  ).toBeInTheDocument();
+  await waitFor(() => expect(api.fetchMyRoundPolicy).toHaveBeenCalled());
+  await act(async () => resolve(structuredClone(base)));
+  expect(
+    await screen.findByRole('button', { name: '添加政策分项' }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole('status', { name: '正在读取本回合政策…' }),
+  ).not.toBeInTheDocument();
+  cleanup();
+  vi.mocked(api.fetchMyRoundPolicy).mockRejectedValue(
+    new Error('政策连接中断'),
+  );
+  render(<RoundPolicyCenter game={game} />);
+  await screen.findByText('政策连接中断');
+  expect(
+    screen.queryByRole('status', { name: '正在读取本回合政策…' }),
+  ).not.toBeInTheDocument();
+});
+
+it('hides the previous player policy while opening another document and ignores a late response', async () => {
+  const second = {
+    ...formal,
+    memberId: 'second',
+    countryId: 'south',
+    countryName: '南国',
+    playerName: '玩家乙',
+    sections: formal.sections.map((s) => ({ ...s, text: '南国政策正文' })),
+  };
+  vi.mocked(api.fetchRoundPolicies).mockResolvedValue([formal, second]);
+  render(<RoundPolicyCenter game={{ ...game, role: 'Host' }} />);
+  await screen.findByText('研究与内政');
+  let resolveOlder!: (policy: RoundPolicy) => void;
+  vi.mocked(api.fetchRoundPolicy).mockReturnValueOnce(
+    new Promise((done) => {
+      resolveOlder = done;
+    }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: /南国 · 玩家乙/ }));
+  expect(
+    screen.getByRole('status', { name: '正在读取本回合政策…' }),
+  ).toBeInTheDocument();
+  expect(screen.queryByText('研究与内政')).not.toBeInTheDocument();
+  vi.mocked(api.fetchRoundPolicy).mockResolvedValueOnce(formal);
+  fireEvent.click(screen.getByRole('button', { name: /康提 · 玩家甲/ }));
+  await screen.findByText('研究与内政');
+  await act(async () => resolveOlder(second));
+  expect(screen.queryByText('南国政策正文')).not.toBeInTheDocument();
+});
+
 it('adds independent repeated-category sections and submits them all with one request', async () => {
   render(<RoundPolicyCenter game={game} />);
   await screen.findByText(/分类只是写作提示/);

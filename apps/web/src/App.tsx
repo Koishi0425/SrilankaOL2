@@ -15,6 +15,7 @@ import { DraftAccountProvider } from './drafts/local-drafts.js';
 import { gameStatusNames, roleNames, seasonNames } from './game-labels.js';
 import { LoginPanel, PasswordPanel } from './accounts/AccountPanels.js';
 import { GlobalAssistantSettings } from './assistant/GlobalAssistantSettings.js';
+import { LoadingSkeleton } from './ui/LoadingSkeleton.js';
 
 type SessionState =
   | { kind: 'loading' }
@@ -277,7 +278,7 @@ export function App() {
         </p>
       )}
 
-      {session.kind === 'loading' && <p className="loading">加载中…</p>}
+      {session.kind === 'loading' && <LoadingSkeleton label="正在加载游戏…" />}
       {session.kind === 'guest' && (
         <LoginPanel message={session.message} onSuccess={loadSession} />
       )}

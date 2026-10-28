@@ -7,6 +7,7 @@ import type {
   ProvinceValues,
 } from '@srilanka/contracts';
 import { fetchProvinces, setProvince } from '../api.js';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 type Draft = {
   id: string;
   name: string;
@@ -198,7 +199,9 @@ export function ProvincePanel({
             </p>
           )}
           {message && <p role="status">{message}</p>}
-          {!data && !error && <p>加载中…</p>}
+          {!data && !error && (
+            <LoadingSkeleton label="正在读取省份资料…" layout="table" />
+          )}
           {data && !data.provinces.length && (
             <p>
               {host

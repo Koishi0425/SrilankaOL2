@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GamePreparation, QuarterSummary } from '@srilanka/contracts';
 import { fetchPreparation, openFirstQuarter } from '../api.js';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 
 export type PreparationTarget =
   'members' | 'rules' | 'map' | 'economy' | 'government';
@@ -93,7 +94,7 @@ export function GamePreparationPanel({
   }
   return (
     <div className="game-preparation">
-      {!data && !error && <p>读取准备内容…</p>}
+      {!data && !error && <LoadingSkeleton label="读取准备内容…" />}
       {data && (
         <>
           <div className="preparation-row">

@@ -6,6 +6,7 @@ import type {
   TileDetails,
 } from '@srilanka/contracts';
 import { fetchTileContext } from '../api.js';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 import type { MapActionIntent } from './map-actions.js';
 
 export type ProvinceScope = NonNullable<MapTileContext['province']>['tiles'];
@@ -94,7 +95,7 @@ export function TileContextPanel({
           {error} <button onClick={() => setReload((n) => n + 1)}>重试</button>
         </p>
       )}
-      {!current && !error && <p role="status">读取省份资料…</p>}
+      {!current && !error && <LoadingSkeleton label="读取省份资料…" />}
       {province && (
         <div className="tile-province-heading">
           <strong>{province.name}</strong>

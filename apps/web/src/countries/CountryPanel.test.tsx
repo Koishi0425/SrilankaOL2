@@ -58,6 +58,39 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it('replaces initial placeholders with data and retains the data during a refresh', async () => {
+  let resolve!: (data: NationalStatus) => void;
+  vi.mocked(fetchNationalStatus).mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  render(<CountryPanel game={game} active />);
+  expect(
+    screen.getByRole('status', { name: '正在读取国家资料…' }),
+  ).toBeInTheDocument();
+  expect(screen.queryByText('尚未分配国家。')).not.toBeInTheDocument();
+  resolve(structuredClone(status));
+  await screen.findByRole('heading', { name: '北国' });
+  vi.mocked(fetchNationalStatus).mockReturnValueOnce(new Promise(() => {}));
+  fireEvent.click(screen.getByRole('button', { name: '刷新' }));
+  expect(screen.getByRole('heading', { name: '北国' })).toBeInTheDocument();
+  expect(
+    screen.queryByRole('status', { name: '正在读取国家资料…' }),
+  ).not.toBeInTheDocument();
+});
+
+it('stops showing a placeholder when the initial national request fails', async () => {
+  vi.mocked(fetchNationalStatus).mockRejectedValue(
+    new Error('国家资料连接失败'),
+  );
+  render(<CountryPanel game={game} active />);
+  await screen.findByText('国家资料连接失败');
+  expect(
+    screen.queryByRole('status', { name: '正在读取国家资料…' }),
+  ).not.toBeInTheDocument();
+});
+
 it('lets observers open public diplomacy while no private national controls or balances are present', async () => {
   vi.mocked(fetchNationalStatus).mockResolvedValue({
     countries: [],

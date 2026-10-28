@@ -15,6 +15,7 @@ import { resourceNames, signedAmount } from './resource-labels.js';
 import { ProvincePanel } from './ProvincePanel.js';
 import { TradePanel } from './TradePanel.js';
 import { GovernmentPanel } from './GovernmentPanel.js';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 
 const seasons = {
   Spring: '春季',
@@ -263,7 +264,7 @@ export function CountryPanel({
             {error}
           </p>
         )}
-        {!data && <p>加载中…</p>}
+        {!data && !error && <LoadingSkeleton label="正在读取国家资料…" />}
         {data && !country && game.role !== 'Observer' && <p>尚未分配国家。</p>}
         {country && (
           <>
@@ -475,7 +476,12 @@ export function CountryPanel({
                         </table>
                       </div>
                     )}
-                    {ledgerBusy && <p>加载中…</p>}
+                    {ledgerBusy && !ledger && (
+                      <LoadingSkeleton label="正在读取账目…" layout="table" />
+                    )}
+                    {ledgerBusy && ledger && (
+                      <p role="status">正在读取更早账目…</p>
+                    )}
                     {ledger?.nextCursor && (
                       <button disabled={ledgerBusy} onClick={() => void more()}>
                         更早账目

@@ -12,6 +12,7 @@ import type {
 } from '@srilanka/contracts';
 
 import { isGameReadOnly } from '@srilanka/contracts';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 import {
   ApiRequestError,
   createArmy,
@@ -826,6 +827,11 @@ export function HexMap({
       className={`map-shell${compact ? ' map-shell--compact' : ''}${overlay ? ' map-shell--overlay' : ''}`}
     >
       {missingMap && !editing && <p className="muted">本局尚未设置地图。</p>}
+      {!missingMap && !error && (!metadata || !viewport) && (
+        <div className="map-loading">
+          <LoadingSkeleton label="正在读取地图…" layout="map" />
+        </div>
+      )}
       <div className="map-toolbar-region">
         <div className="map-toolbar" hidden={!metadata}>
           {metadata && (

@@ -11,6 +11,7 @@ import type {
   GameSummary,
 } from '@srilanka/contracts';
 import { fetchDiplomacy, setupDiplomacy } from '../api.js';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 import {
   DiplomacyForm,
   DiplomacyRecord,
@@ -108,7 +109,7 @@ export function DiplomacyPanel({
             </p>
           )}
           {message && <p role="status">{message}</p>}
-          {!data && <p>加载中…</p>}
+          {!data && !error && <LoadingSkeleton label="正在读取外交资料…" />}
           {data && (
             <>
               {editing ? (

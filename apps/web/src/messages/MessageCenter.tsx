@@ -23,6 +23,7 @@ import {
   sendMessage,
 } from '../api.js';
 import { DraftSession, useDraftKey } from '../drafts/local-drafts.js';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 
 interface MessageLocalDraft {
   content: string;
@@ -70,6 +71,7 @@ export function MessageCenter({
   const host = ['Host', 'Administrator'].includes(game.role);
   const readOnly = isGameReadOnly(game.status);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [listLoaded, setListLoaded] = useState(false);
   const [selected, setSelected] = useState<ConversationSummary | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -129,6 +131,7 @@ export function MessageCenter({
       );
     } finally {
       listBusy.current = false;
+      setListLoaded(true);
     }
   }, [game.id, onUnreadChange]);
 
@@ -412,6 +415,9 @@ export function MessageCenter({
       )}
       <div className="center-layout message-layout">
         <aside className="center-list">
+          {!listLoaded && (
+            <LoadingSkeleton label="正在读取会话列表…" layout="list" />
+          )}
           {conversations.map((conversation) => (
             <button
               className={
@@ -427,7 +433,9 @@ export function MessageCenter({
               )}
             </button>
           ))}
-          {!conversations.length && <p className="muted">暂无会话。</p>}
+          {listLoaded && !connectionError && !conversations.length && (
+            <p className="muted">暂无会话。</p>
+          )}
         </aside>
         <div className="center-detail">
           {creating && (
@@ -502,6 +510,7 @@ export function MessageCenter({
                 className="message-stream"
                 role="log"
                 aria-label="会话消息"
+                aria-busy={reading}
                 ref={stream}
                 onScroll={(event) => {
                   const element = event.currentTarget;
@@ -519,10 +528,14 @@ export function MessageCenter({
                     <small>{new Date(message.sentAt).toLocaleString()}</small>
                   </article>
                 ))}
-                {!messages.length && (
-                  <p className="muted">
-                    {reading ? '加载中…' : '还没有消息。'}
-                  </p>
+                {reading && (
+                  <LoadingSkeleton
+                    label="正在读取会话消息…"
+                    layout="messages"
+                  />
+                )}
+                {!reading && !error && !messages.length && (
+                  <p className="muted">还没有消息。</p>
                 )}
               </div>
               {!readOnly && (

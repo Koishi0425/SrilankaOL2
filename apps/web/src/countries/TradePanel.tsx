@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 import { isGameReadOnly } from '@srilanka/contracts';
 import type {
   GameSummary,
@@ -185,7 +186,9 @@ export function TradePanel({
             </p>
           )}
           {message && <p role="status">{message}</p>}
-          {loading && !data && !draft && <p>加载中…</p>}
+          {loading && !data && !draft && !error && (
+            <LoadingSkeleton label="正在读取贸易资料…" layout="table" />
+          )}
           {data && !draft && (
             <>
               {host && (

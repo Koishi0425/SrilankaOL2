@@ -59,6 +59,7 @@ import {
 import { resourceNames, signedAmount } from '../countries/resource-labels.js';
 import { SettlementCorrections } from './SettlementCorrections.js';
 import { AssistantPanel } from '../assistant/AssistantPanel.js';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 import {
   DraftRecovery,
   useDraftKey,
@@ -314,6 +315,9 @@ export function SettlementPanel({
       const request = ++generation.current;
       setBusy(true);
       setError('');
+      setData((current) =>
+        current?.quarter.id === quarterId ? current : null,
+      );
       try {
         const [roundList, settlement] = await Promise.all([
           fetchSettlements(game.id),
@@ -545,7 +549,7 @@ export function SettlementPanel({
             <select
               aria-label="查看回合"
               disabled={busy || correcting}
-              value={data?.quarter.id ?? game.currentQuarter.id}
+              value={data?.quarter.id ?? selectedQuarter.current}
               onChange={(event) => {
                 if (dirty) {
                   setError('请先保存草稿，或放弃修改并刷新。');
@@ -627,11 +631,7 @@ export function SettlementPanel({
           }}
         />
       )}
-      {!data && (
-        <p className="muted settlement-notice">
-          {busy ? '加载中…' : '无法读取结算，请重试。'}
-        </p>
-      )}
+      {!data && !error && <LoadingSkeleton label="正在读取回合结算…" />}
       {data && !editable && !data.publishedAt && (
         <div className="center-detail">
           <p className="muted">

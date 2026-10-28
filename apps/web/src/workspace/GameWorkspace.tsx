@@ -52,6 +52,7 @@ import { isGameReadOnly } from '@srilanka/contracts';
 import { GameLifecyclePanel } from './GameLifecyclePanel.js';
 import { AccountManagement } from '../accounts/AccountPanels.js';
 import { WorkspaceSplitHandle } from './WorkspaceSplitHandle.js';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 export function GameWorkspace({
   game,
   onGameChange,
@@ -473,7 +474,7 @@ export function GameWorkspace({
           </div>
         )}
       </header>
-      {loading && <p className="muted">加载中…</p>}
+      {loading && <LoadingSkeleton label="正在加载游戏面板…" layout="map" />}
       {error && (
         <p className="form-error" role="alert">
           {error}

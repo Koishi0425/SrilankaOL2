@@ -75,6 +75,51 @@ afterEach(() => {
 });
 
 describe('MessageCenter', () => {
+  it('distinguishes a pending conversation list and message history from empty results', async () => {
+    let resolveList!: (items: ConversationSummary[]) => void;
+    vi.mocked(fetchConversations).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveList = resolve;
+      }),
+    );
+    render(<MessageCenter game={game} countries={[]} />);
+    expect(
+      screen.getByRole('status', { name: '正在读取会话列表…' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('暂无会话。')).not.toBeInTheDocument();
+    await act(async () => resolveList([a]));
+    let resolveHistory!: (page: {
+      items: ConversationMessage[];
+      nextCursor: null;
+    }) => void;
+    vi.mocked(fetchMessages).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveHistory = resolve;
+      }),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /北方探索/ }));
+    expect(
+      screen.getByRole('status', { name: '正在读取会话消息…' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('还没有消息。')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('消息内容')).toBeDisabled();
+    await act(async () => resolveHistory({ items: [], nextCursor: null }));
+    expect(await screen.findByText('还没有消息。')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('status', { name: '正在读取会话消息…' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('removes the list placeholder after a failed request without claiming the list is empty', async () => {
+    vi.mocked(fetchConversations).mockRejectedValue(new Error('会话连接中断'));
+    render(<MessageCenter game={game} countries={[]} />);
+    await screen.findByText('会话连接中断');
+    expect(
+      screen.queryByRole('status', { name: '正在读取会话列表…' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('暂无会话。')).not.toBeInTheDocument();
+  });
+
   it('does not restore a private message when the conversation no longer authorizes reading', async () => {
     const editor = () => (
       <DraftAccountProvider userId="one">

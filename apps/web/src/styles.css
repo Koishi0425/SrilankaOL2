@@ -3406,6 +3406,95 @@ select:focus-visible {
   font: inherit;
 }
 
+/* Loading shapes reserve space without suggesting that real records exist. */
+.loading-skeleton {
+  padding: 18px 16px;
+  min-width: 0;
+  width: 100%;
+}
+.loading-skeleton__shapes {
+  display: grid;
+  gap: 18px;
+}
+.loading-skeleton__heading,
+.loading-skeleton__row > span {
+  display: block;
+  height: 12px;
+  border-radius: 4px;
+  background: #e7ede9;
+}
+.loading-skeleton__heading {
+  width: 38%;
+  max-width: 200px;
+  height: 18px;
+}
+.loading-skeleton__row {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #edf1ee;
+  border-radius: 6px;
+}
+.loading-skeleton__row > span:first-child {
+  width: 72%;
+}
+.loading-skeleton__row > span:last-child {
+  width: 48%;
+}
+.loading-skeleton--list .loading-skeleton__heading,
+.loading-skeleton--messages .loading-skeleton__heading {
+  display: none;
+}
+.loading-skeleton--list .loading-skeleton__row {
+  padding: 12px 8px;
+}
+.loading-skeleton--list .loading-skeleton__row > span:last-child {
+  display: none;
+}
+.loading-skeleton--messages .loading-skeleton__row {
+  width: 85%;
+  background: #f6f8f6;
+}
+.loading-skeleton--messages .loading-skeleton__row:nth-child(odd) {
+  justify-self: end;
+  width: 72%;
+}
+.loading-skeleton--table .loading-skeleton__shapes {
+  gap: 0;
+}
+.loading-skeleton--table .loading-skeleton__heading {
+  margin-bottom: 16px;
+}
+.loading-skeleton--table .loading-skeleton__row {
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 16px;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+.loading-skeleton--map {
+  flex: 1;
+  min-height: 260px;
+}
+.loading-skeleton--map .loading-skeleton__row:first-of-type {
+  min-height: 180px;
+  background: #e7ede9;
+  border: 0;
+}
+.loading-skeleton--map .loading-skeleton__row:first-of-type > span {
+  display: none;
+}
+.map-shell {
+  position: relative;
+}
+.map-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  background: #f7f9f6;
+  pointer-events: none;
+}
+
 /* Keep feedback brief and opt in to motion only when the user allows it.
    Animate opacity/translation, never map geometry or panel dimensions. */
 @media (prefers-reduced-motion: no-preference) {
@@ -3413,6 +3502,10 @@ select:focus-visible {
     --motion-fast: 120ms;
     --motion-enter: 180ms;
     --motion-ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+
+  .loading-skeleton__shapes {
+    animation: skeleton-pulse 1.6s ease-in-out infinite;
   }
 
   button,
@@ -3467,6 +3560,16 @@ select:focus-visible {
   .session-notice,
   .draft-message-notice {
     animation: interaction-rise var(--motion-enter) var(--motion-ease);
+  }
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
   }
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 import type {
   AssistantInput,
   AssistantResult,
@@ -301,6 +302,7 @@ export function AssistantPanel({
               {disabled && disabledReason && (
                 <p className="muted">{disabledReason}</p>
               )}
+              {busy && !result && <LoadingSkeleton label="正在生成 AI 内容…" />}
               {result && (
                 <div className="assistant-result" aria-live="polite">
                   {stale && !message && (

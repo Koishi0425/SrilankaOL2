@@ -6,6 +6,7 @@ import type {
   ReviewRoundPolicyInput,
 } from '@srilanka/contracts';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
 import type { ComponentProps } from 'react';
 import {
   fetchMyRoundPolicy,
@@ -103,6 +104,9 @@ export function RoundPolicyCenter({
   const readOnly = isGameReadOnly(game.status);
   const [items, setItems] = useState<RoundPolicySummary[]>([]);
   const [policy, setPolicy] = useState<RoundPolicy | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const openingRequest = useRef<number | null>(null);
   const [sections, setSections] = useState<RoundPolicySectionInput[]>([]);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -147,13 +151,14 @@ export function RoundPolicyCenter({
 
   const accept = useCallback((next: RoundPolicy) => {
     setPolicy(next);
+    setLoaded(true);
     setSections(next.draftSections ?? next.sections);
     setDirty(false);
     setConfirm(false);
   }, []);
 
   const refresh = useCallback(async () => {
-    if (reading.current) return;
+    if (reading.current || openingRequest.current !== null) return;
     reading.current = true;
     const token = generation.current;
     try {
@@ -179,6 +184,7 @@ export function RoundPolicyCenter({
         !pending.current &&
         !writingReview.current
       ) {
+        setError('');
         if (next) accept(next);
         else setPolicy(null);
       }
@@ -186,12 +192,17 @@ export function RoundPolicyCenter({
       if (token === generation.current) setError(message(cause));
     } finally {
       reading.current = false;
+      if (token === generation.current) setLoaded(true);
     }
   }, [game.id, quarter.id, host, accept]);
 
   useEffect(() => {
     generation.current++;
     setPolicy(null);
+    setLoaded(false);
+    setOpening(false);
+    openingRequest.current = null;
+    setItems([]);
     setSections([]);
     setDirty(false);
     setError('');
@@ -231,6 +242,9 @@ export function RoundPolicyCenter({
       return;
     handledFocus.current = focus.key;
     const token = ++generation.current;
+    openingRequest.current = token;
+    setOpening(true);
+    setError('');
     void fetchRoundPolicyForAction(game.id, focus.actionId)
       .then((next) => {
         if (token !== generation.current) return;
@@ -245,6 +259,13 @@ export function RoundPolicyCenter({
         if (token === generation.current) {
           setError(message(cause));
           handledFocus.current = undefined;
+        }
+      })
+      .finally(() => {
+        if (openingRequest.current === token) {
+          openingRequest.current = null;
+          setOpening(false);
+          setLoaded(true);
         }
       });
   }, [active, focus, game.id, accept, dirty]);
@@ -302,6 +323,8 @@ export function RoundPolicyCenter({
   async function open(item: RoundPolicySummary) {
     if (pending.current) return;
     const token = ++generation.current;
+    openingRequest.current = token;
+    setOpening(true);
     setError('');
     setNotice('');
     try {
@@ -309,6 +332,11 @@ export function RoundPolicyCenter({
       if (token === generation.current) accept(next);
     } catch (cause) {
       if (token === generation.current) setError(message(cause));
+    } finally {
+      if (openingRequest.current === token) {
+        openingRequest.current = null;
+        setOpening(false);
+      }
     }
   }
   function requestId(signature: string) {
@@ -551,6 +579,9 @@ export function RoundPolicyCenter({
               </label>
             </div>
             <p>每位玩家每回合一份，全部分项一起评阅。</p>
+            {!loaded && !error && (
+              <LoadingSkeleton label="正在读取玩家政策列表…" layout="list" />
+            )}
             {visible.map((p) => (
               <button
                 key={policyKey(p)}
@@ -570,12 +601,20 @@ export function RoundPolicyCenter({
                 </span>
               </button>
             ))}
-            {!visible.length && <p>暂无符合条件的正式提交。</p>}
+            {loaded && !error && !visible.length && (
+              <p>暂无符合条件的正式提交。</p>
+            )}
           </aside>
         )}
         <div className="center-detail">
-          {!policy ? (
-            <p>{host ? '选择玩家查看整份政策。' : '正在读取本回合政策…'}</p>
+          {(!loaded || opening) && !error ? (
+            <LoadingSkeleton label="正在读取本回合政策…" />
+          ) : !policy ? (
+            !error && (
+              <p>
+                {host ? '选择玩家查看整份政策。' : '本回合暂无可读取的政策。'}
+              </p>
+            )
           ) : (
             <>
               <h4>

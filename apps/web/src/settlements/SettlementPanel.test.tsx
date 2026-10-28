@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -133,6 +134,62 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('settlement writing and publication', () => {
+  it('replaces a previous round with a placeholder until the selected round arrives', async () => {
+    const current = {
+      ...draft,
+      publicReport: '当前回合公开报告',
+      publishedAt: '2026-10-28T00:00:00Z',
+    };
+    vi.mocked(fetchSettlement).mockResolvedValue(current);
+    const rounds = await fetchSettlements('game');
+    vi.mocked(fetchSettlements).mockResolvedValue([
+      ...rounds,
+      { ...rounds[0]!, quarterId: 'older', isCurrent: false },
+    ]);
+    render(
+      <SettlementPanel
+        game={{ ...game, role: 'Player' }}
+        onQuarterChange={vi.fn()}
+      />,
+    );
+    await screen.findByText('当前回合公开报告');
+    let resolve!: (value: QuarterSettlement) => void;
+    vi.mocked(fetchSettlement).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    fireEvent.change(screen.getByRole('combobox', { name: '查看回合' }), {
+      target: { value: 'older' },
+    });
+    expect(
+      screen.getByRole('status', { name: '正在读取回合结算…' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('当前回合公开报告')).not.toBeInTheDocument();
+    await act(async () =>
+      resolve({
+        ...current,
+        quarter: { ...current.quarter, id: 'older' },
+        isCurrent: false,
+        publicReport: '旧回合公开报告',
+      }),
+    );
+    await screen.findByText('旧回合公开报告');
+    expect(
+      screen.queryByRole('status', { name: '正在读取回合结算…' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('replaces the initial settlement placeholder with a recoverable error', async () => {
+    vi.mocked(fetchSettlement).mockRejectedValue(new Error('结算连接中断'));
+    render(<SettlementPanel game={game} onQuarterChange={vi.fn()} />);
+    await screen.findByText('结算连接中断');
+    expect(
+      screen.queryByRole('status', { name: '正在读取回合结算…' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '刷新' })).toBeEnabled();
+  });
+
   it('recovers and saves selected result recipients with the feedback', async () => {
     vi.mocked(fetchSettlement).mockResolvedValue({
       ...draft,
