@@ -408,6 +408,7 @@ legend {
   padding: 0 12px;
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
+  overflow-y: hidden;
 }
 .workspace-tabs button {
   flex: 0 0 auto;
@@ -3523,6 +3524,11 @@ select:focus-visible {
   .button:active:not(:disabled) {
     translate: 0 1px;
     transition-duration: 60ms;
+  }
+
+  /* Moving a full-height tab creates vertical overflow in its scroll strip. */
+  .workspace-tabs button:active:not(:disabled) {
+    translate: none;
   }
 
   input,
