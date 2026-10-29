@@ -51,6 +51,7 @@ function appendMessages(
   return [...current.filter((message) => !ids.has(message.id)), ...incoming];
 }
 
+import { MobileBack, useMobileDetail } from '../ui/mobile.js';
 export function MessageCenter({
   game,
   countries,
@@ -72,6 +73,7 @@ export function MessageCenter({
   const readOnly = isGameReadOnly(game.status);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [listLoaded, setListLoaded] = useState(false);
+  const mobileDetail = useMobileDetail();
   const [selected, setSelected] = useState<ConversationSummary | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -152,6 +154,7 @@ export function MessageCenter({
 
   const open = useCallback(
     async (conversation: ConversationSummary) => {
+      mobileDetail.open();
       const request = ++generation.current;
       selectedId.current = conversation.id;
       newestId.current = undefined;
@@ -400,6 +403,7 @@ export function MessageCenter({
                 setSelected(null);
                 setReading(false);
                 setCreating(true);
+                mobileDetail.open();
                 setError('');
               }}
             >
@@ -413,7 +417,11 @@ export function MessageCenter({
           {error || connectionError}
         </p>
       )}
-      <div className="center-layout message-layout">
+      <div
+        className="center-layout message-layout"
+        ref={mobileDetail.paneRef}
+        data-mobile-pane={mobileDetail.pane}
+      >
         <aside className="center-list">
           {!listLoaded && (
             <LoadingSkeleton label="正在读取会话列表…" layout="list" />
@@ -438,6 +446,7 @@ export function MessageCenter({
           )}
         </aside>
         <div className="center-detail">
+          <MobileBack onClick={mobileDetail.back}>会话列表</MobileBack>
           {creating && (
             <form
               className="conversation-form"

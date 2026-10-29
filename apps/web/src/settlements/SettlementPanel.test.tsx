@@ -1558,3 +1558,29 @@ describe('settlement writing and publication', () => {
     expect(screen.queryByText('春季公报')).not.toBeInTheDocument();
   });
 });
+
+it('preserves settlement feedback through the phone list and report navigation', async () => {
+  const page = render(
+    <SettlementPanel game={game} onQuarterChange={vi.fn()} />,
+  );
+  const entry = await screen.findByRole('button', { name: /北方探索 康提/ });
+  fireEvent.click(entry);
+  fireEvent.change(screen.getByLabelText('政策结算反馈'), {
+    target: { value: '手机撰写的结算反馈' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /结算列表/ }));
+  expect(page.container.querySelector('[data-mobile-pane]')).toHaveAttribute(
+    'data-mobile-pane',
+    'list',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '回合公报' }));
+  fireEvent.click(screen.getByRole('button', { name: /结算列表/ }));
+  fireEvent.click(entry);
+  expect(screen.getByLabelText('政策结算反馈')).toHaveValue(
+    '手机撰写的结算反馈',
+  );
+  expect(page.container.querySelector('[data-mobile-pane]')).toHaveAttribute(
+    'data-mobile-pane',
+    'detail',
+  );
+});

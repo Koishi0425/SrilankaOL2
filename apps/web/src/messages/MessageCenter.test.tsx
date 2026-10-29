@@ -335,3 +335,27 @@ describe('MessageCenter', () => {
     ).toBeInTheDocument();
   });
 });
+
+it('keeps a message draft when returning to the phone conversation list', async () => {
+  const page = render(<MessageCenter game={game} countries={[]} />);
+  fireEvent.click(await screen.findByRole('button', { name: /北方探索/ }));
+  await waitFor(() => expect(screen.getByLabelText('消息内容')).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('消息内容'), {
+    target: { value: '待讨论的投入方案' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /会话列表/ }));
+  expect(page.container.querySelector('[data-mobile-pane]')).toHaveAttribute(
+    'data-mobile-pane',
+    'list',
+  );
+  fireEvent.click(screen.getByRole('button', { name: /北方探索/ }));
+  await waitFor(() =>
+    expect(screen.getByLabelText('消息内容')).toHaveValue('待讨论的投入方案'),
+  );
+  expect(page.container.querySelector('[data-mobile-pane]')).toHaveAttribute(
+    'data-mobile-pane',
+    'detail',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '新建会谈' }));
+  expect(screen.getByRole('heading', { name: '新建会谈' })).toBeInTheDocument();
+});

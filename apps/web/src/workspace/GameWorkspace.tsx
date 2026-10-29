@@ -53,6 +53,12 @@ import { GameLifecyclePanel } from './GameLifecyclePanel.js';
 import { AccountManagement } from '../accounts/AccountPanels.js';
 import { WorkspaceSplitHandle } from './WorkspaceSplitHandle.js';
 import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
+import { useMobileViewport } from '../ui/mobile.js';
+import {
+  MobileNavigation,
+  MobileDirectory,
+  type WorkspacePage,
+} from './MobileNavigation.js';
 export function GameWorkspace({
   game,
   onGameChange,
@@ -60,6 +66,15 @@ export function GameWorkspace({
   game: GameSummary;
   onGameChange?: (game: GameSummary) => void;
 }) {
+  const mobile = useMobileViewport();
+  const [mobileMore, setMobileMore] = useState(false);
+  function mobileNavigate(page: WorkspacePage) {
+    setMobileMore(false);
+    setOverviewOpen(false);
+    if (page === 'actions') setActionsOpened(true);
+    if (page === 'settlement') setSettlementOpened(true);
+    setWorkspaceTab(page);
+  }
   const readOnly = isGameReadOnly(game.status);
   const [members, setMembers] = useState<GameMemberSummary[]>([]);
   const [accountTarget, setAccountTarget] = useState<GameMemberSummary | null>(
@@ -186,11 +201,19 @@ export function GameWorkspace({
     overview.national?.countries.find((c) => c.id === selectedCountryId) ??
     overview.national?.countries[0];
   function openCountry(section: CountrySection = 'overview') {
+    setMobileMore(false);
     setCountrySection(section);
     setCountryOpened(true);
     setWorkspaceTab('country');
   }
   function closePanel() {
+    if (
+      mobile &&
+      ['country', 'rules', 'members', 'preparation'].includes(workspaceTab)
+    ) {
+      setMobileMore(true);
+      return;
+    }
     const origin = workspaceTab === 'country' ? countrySection : workspaceTab;
     setWorkspaceTab('map');
     navigationRef.current
@@ -390,8 +413,40 @@ export function GameWorkspace({
 
   return (
     <section
+      data-mobile-more={mobile && mobileMore}
       className={`workspace-card strategy-workspace${canManage ? ' strategy-workspace--host' : ''}`}
     >
+      {mobile && (
+        <header className="mobile-game-heading">
+          <div>
+            <strong>{game.name}</strong>
+            <span>
+              {roleNames[game.role]} · 第 {currentQuarter.gameYear} 年{' '}
+              {seasonNames[currentQuarter.season]}
+            </span>
+          </div>
+          <span className="mobile-phase">
+            {readOnly
+              ? '已结束 · 只读'
+              : quarterStateNames[currentQuarter.state]}
+          </span>
+        </header>
+      )}
+      {mobile && (
+        <div className="mobile-editor-bar">
+          <span>正在编辑 · {panelTitle}</span>
+          <button
+            type="button"
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => {
+              if (document.activeElement instanceof HTMLElement)
+                document.activeElement.blur();
+            }}
+          >
+            完成输入
+          </button>
+        </div>
+      )}
       <header className="strategy-topbar">
         <div className="strategy-identity">
           <h2>{game.name}</h2>
@@ -489,7 +544,7 @@ export function GameWorkspace({
           <button onClick={overview.refresh}>重试国家资料</button>
         </p>
       )}
-      {!loading && (
+      {!loading && !mobile && (
         <>
           <nav
             ref={navigationRef}
@@ -621,9 +676,28 @@ export function GameWorkspace({
           </nav>
         </>
       )}
+      {mobile && mobileMore && (
+        <MobileDirectory
+          host={canManage}
+          observer={game.role === 'Observer'}
+          preparing={preparingOpening}
+          readOnly={readOnly}
+          preview={!!previewMemberId}
+          onNavigate={mobileNavigate}
+          onCountry={openCountry}
+          onOverview={() => {
+            mobileNavigate('map');
+            setOverviewOpen(true);
+          }}
+          onExitPreview={() => {
+            setPreviewMemberId('');
+            mobileNavigate('map');
+          }}
+        />
+      )}
       <div
         className={`strategy-body${!previewMemberId && overviewOpen && workspaceTab === 'map' ? ' strategy-body--overview' : ''}${workspaceTab === 'preparation' && !previewMemberId ? ' strategy-body--preparing' : ''}`}
-        hidden={loading}
+        hidden={loading || (mobile && mobileMore)}
       >
         <div
           className={`strategy-main${workspaceTab !== 'map' && !previewMemberId ? ' strategy-main--panel' : ''}${panelExpanded || workspaceTab === 'preparation' ? ' strategy-main--expanded' : ''}`}
@@ -634,6 +708,7 @@ export function GameWorkspace({
           <div
             className="strategy-map"
             aria-label="世界地图"
+            inert={mobile && workspaceTab !== 'map' && !previewMemberId}
             hidden={workspaceTab === 'preparation' && !previewMemberId}
           >
             <HexMap
@@ -668,7 +743,12 @@ export function GameWorkspace({
                     }
                   : undefined
               }
-              active={!loading && workspaceTab !== 'preparation'}
+              active={
+                !loading &&
+                !(mobile && mobileMore) &&
+                workspaceTab !== 'preparation' &&
+                (!mobile || workspaceTab === 'map')
+              }
               revealSeed={mapRevealSeed}
               onReturnSettlement={openSettlement}
               onInspectTile={() => setWorkspaceTab('map')}
@@ -695,7 +775,12 @@ export function GameWorkspace({
                   </button>
                 )}
                 <button aria-label="关闭面板" onClick={closePanel}>
-                  返回地图
+                  {mobile &&
+                  ['country', 'rules', 'members', 'preparation'].includes(
+                    workspaceTab,
+                  )
+                    ? '返回全部功能'
+                    : '返回地图'}
                 </button>
               </div>
             </header>
@@ -740,7 +825,10 @@ export function GameWorkspace({
                   <RoundPolicyCenter
                     game={{ ...game, currentQuarter }}
                     active={
-                      !loading && workspaceTab === 'actions' && !previewMemberId
+                      !loading &&
+                      workspaceTab === 'actions' &&
+                      !previewMemberId &&
+                      !(mobile && mobileMore)
                     }
                     rules={rules}
                     seed={actionSeed}
@@ -769,7 +857,10 @@ export function GameWorkspace({
                   countries={countries}
                   members={members}
                   active={
-                    !loading && workspaceTab === 'messages' && !previewMemberId
+                    !loading &&
+                    workspaceTab === 'messages' &&
+                    !previewMemberId &&
+                    !(mobile && mobileMore)
                   }
                   target={conversationTarget}
                   onUnreadChange={setUnreadMessages}
@@ -942,6 +1033,22 @@ export function GameWorkspace({
           />
         )}
       </div>
+      {mobile && !loading && (
+        <MobileNavigation
+          page={workspaceTab}
+          more={mobileMore}
+          host={canManage}
+          observer={game.role === 'Observer'}
+          preview={!!previewMemberId}
+          readOnly={readOnly}
+          unread={unreadMessages}
+          onNavigate={mobileNavigate}
+          onMore={() => {
+            setOverviewOpen(false);
+            setMobileMore(true);
+          }}
+        />
+      )}
     </section>
   );
 }

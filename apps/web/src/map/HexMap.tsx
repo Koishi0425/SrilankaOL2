@@ -128,6 +128,33 @@ export function HexMap({
     startY: number;
     moved: boolean;
   } | null>(null);
+  const touchPoints = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ distance: number; x: number; y: number } | null>(null);
+  function touchGeometry() {
+    const [a, b] = [...touchPoints.current.values()];
+    return a && b
+      ? {
+          distance: Math.hypot(b.x - a.x, b.y - a.y),
+          x: (a.x + b.x) / 2,
+          y: (a.y + b.y) / 2,
+        }
+      : null;
+  }
+  function releaseTouch(id: number) {
+    touchPoints.current.delete(id);
+    pinch.current = touchGeometry();
+    if (touchPoints.current.size === 1) {
+      const [id, point] = [...touchPoints.current.entries()][0]!;
+      dragRef.current = {
+        id,
+        x: point.x,
+        y: point.y,
+        startX: point.x,
+        startY: point.y,
+        moved: true,
+      };
+    }
+  }
   const fittedMap = useRef('');
   const autoFit = useRef(true);
   const previousSize = useRef<{ width: number; height: number } | null>(null);
@@ -167,6 +194,7 @@ export function HexMap({
     name: string;
   } | null>(null);
   const [editing, setEditing] = useState(false);
+  const [mobileMapPicking, setMobileMapPicking] = useState(false);
   const [setupOpened, setSetupOpened] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [layer, setLayer] = useState<MapMode>('political');
@@ -1048,7 +1076,17 @@ export function HexMap({
           </button>
         </div>
       )}
+      {showingEditor && (
+        <div className="mobile-map-picker">
+          <span>已选 {selectedIds.length} 个地块</span>
+          <button onClick={() => setMobileMapPicking((value) => !value)}>
+            {mobileMapPicking ? '填写选区设置' : '在地图选择地块'}
+          </button>
+        </div>
+      )}
       <div
+        data-mobile-picking={showingEditor && mobileMapPicking}
+        data-moving-army={!!movingArmy}
         className={`map-layout${showingEditor ? ' map-layout--editing' : ''}${overlay ? ' map-layout--overlay' : ''}${showDetails && (showingEditor || selected) ? ' map-layout--inspecting' : ''}`}
         hidden={missingMap && !editing}
       >
@@ -1132,7 +1170,24 @@ export function HexMap({
               }
             }}
             onPointerDown={(event) => {
-              if (event.button !== 0 || !event.isPrimary) return;
+              if (
+                event.button !== 0 ||
+                (!event.isPrimary && event.pointerType !== 'touch')
+              )
+                return;
+              if (event.pointerType === 'touch') {
+                touchPoints.current.set(event.pointerId, {
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+                if (touchPoints.current.size > 1) {
+                  pinch.current = touchGeometry();
+                  dragRef.current = null;
+                  setHovered(null);
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  return;
+                }
+              }
               event.currentTarget.focus({ preventScroll: true });
               dragRef.current = {
                 id: event.pointerId,
@@ -1145,6 +1200,34 @@ export function HexMap({
               event.currentTarget.setPointerCapture(event.pointerId);
             }}
             onPointerMove={(event) => {
+              if (touchPoints.current.has(event.pointerId)) {
+                touchPoints.current.set(event.pointerId, {
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+                const next = touchGeometry();
+                const previous = pinch.current;
+                if (next && previous) {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  autoFit.current = false;
+                  setView((current) => {
+                    const scaled = zoomAt(
+                      current,
+                      { x: previous.x - rect.left, y: previous.y - rect.top },
+                      next.distance / Math.max(1, previous.distance),
+                      minZoom,
+                      metadata?.maxZoom ?? 3,
+                    );
+                    return {
+                      ...scaled,
+                      offsetX: scaled.offsetX + next.x - previous.x,
+                      offsetY: scaled.offsetY + next.y - previous.y,
+                    };
+                  });
+                  pinch.current = next;
+                  return;
+                }
+              }
               const drag = dragRef.current;
               if (!drag) {
                 const rect = event.currentTarget.getBoundingClientRect();
@@ -1188,7 +1271,14 @@ export function HexMap({
             }}
             onPointerUp={(event) => {
               const drag = dragRef.current;
-              if (!drag || drag.id !== event.pointerId) return;
+              if (!drag || drag.id !== event.pointerId) {
+                releaseTouch(event.pointerId);
+                if (event.currentTarget.hasPointerCapture(event.pointerId))
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                return;
+              }
+              touchPoints.current.delete(event.pointerId);
+              pinch.current = null;
               dragRef.current = null;
               setDragging(false);
               if (event.currentTarget.hasPointerCapture(event.pointerId))
@@ -1214,12 +1304,17 @@ export function HexMap({
                 ),
               );
             }}
-            onPointerCancel={() => {
+            onPointerCancel={(event) => {
               dragRef.current = null;
+              releaseTouch(event.pointerId);
               setDragging(false);
             }}
-            onLostPointerCapture={() => {
-              dragRef.current = null;
+            onLostPointerCapture={(event) => {
+              if (touchPoints.current.has(event.pointerId)) {
+                dragRef.current = null;
+                releaseTouch(event.pointerId);
+              } else if (dragRef.current?.id === event.pointerId)
+                dragRef.current = null;
               setDragging(false);
             }}
             onPointerLeave={() => setHovered(null)}

@@ -557,3 +557,64 @@ it('expands a policy for writing and restores the map without losing its draft',
     'false',
   );
 });
+
+it.each(['Host', 'Player', 'Observer'] as const)(
+  'provides the complete phone navigation for %s without desktop tabs',
+  async (role) => {
+    const original = window.matchMedia;
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    try {
+      const page = render(<GameWorkspace game={{ ...game, role }} />);
+      const navigation = await screen.findByRole('navigation', {
+        name: '手机游戏导航',
+      });
+      expect(
+        screen.queryByRole('navigation', { name: '游戏工作区' }),
+      ).not.toBeInTheDocument();
+      expect(within(navigation).getAllByRole('button')).toHaveLength(
+        role === 'Observer' ? 4 : 5,
+      );
+      fireEvent.click(
+        within(navigation).getByRole('button', { name: '全部功能' }),
+      );
+      const directory = screen.getByRole('region', { name: '全部功能' });
+      expect(
+        within(directory).getByRole('button', { name: /国家概况/ }),
+      ).toBeInTheDocument();
+      expect(
+        within(directory).getByRole('button', { name: /外交/ }),
+      ).toBeInTheDocument();
+      expect(
+        within(directory).queryByRole('button', { name: /军事/ }) !== null,
+      ).toBe(role !== 'Observer');
+      expect(
+        within(directory).queryByRole('button', { name: /本局管理/ }) !== null,
+      ).toBe(role === 'Host');
+      fireEvent.click(
+        within(directory).getByRole('button', { name: /剧本与规则/ }),
+      );
+      expect(
+        await screen.findByRole('region', { name: '剧本与规则' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('region', { name: '全部功能' }),
+      ).not.toBeInTheDocument();
+      fireEvent.click(within(navigation).getByRole('button', { name: /消息/ }));
+      fireEvent.change(screen.getByLabelText('测试消息草稿'), {
+        target: { value: '手机未发送内容' },
+      });
+      fireEvent.click(within(navigation).getByRole('button', { name: '地图' }));
+      fireEvent.click(within(navigation).getByRole('button', { name: /消息/ }));
+      expect(screen.getByLabelText('测试消息草稿')).toHaveValue(
+        '手机未发送内容',
+      );
+      page.unmount();
+    } finally {
+      window.matchMedia = original;
+    }
+  },
+);

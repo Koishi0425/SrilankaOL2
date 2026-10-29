@@ -429,3 +429,62 @@ it('navigates map search results by keyboard and returns focus to the map after 
   await screen.findByRole('heading', { name: '北境' });
   expect(canvas).toHaveFocus();
 });
+
+it('zooms with two fingers without selecting a tile and allows tapping afterwards', async () => {
+  render(<HexMap game={game} countries={[]} overlay />);
+  const canvas = await ready();
+  const touch = (type: string, id: number, x: number, y: number) => {
+    const event = new MouseEvent(type, {
+      bubbles: true,
+      clientX: x,
+      clientY: y,
+      button: 0,
+    });
+    Object.defineProperties(event, {
+      pointerId: { value: id },
+      pointerType: { value: 'touch' },
+      isPrimary: { value: id === 1 },
+    });
+    fireEvent(canvas, event);
+  };
+  for (
+    let i = 0;
+    i < 30 &&
+    !screen.getByRole('button', { name: '缩小地图' }).hasAttribute('disabled');
+    i++
+  )
+    fireEvent.click(screen.getByRole('button', { name: '缩小地图' }));
+  expect(screen.getByRole('button', { name: '缩小地图' })).toBeDisabled();
+  touch('pointerdown', 1, 300, 200);
+  touch('pointerdown', 2, 500, 200);
+  touch('pointermove', 2, 650, 200);
+  expect(screen.getByRole('button', { name: '缩小地图' })).toBeEnabled();
+  touch('pointerup', 2, 650, 200);
+  touch('pointerup', 1, 300, 200);
+  expect(fetchTile).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '全图' }));
+  clickTile(canvas, origin);
+  await waitFor(() => expect(fetchTile).toHaveBeenCalled());
+});
+
+it('keeps map selection while switching between the phone map and setup form', async () => {
+  render(<HexMap game={game} countries={[]} overlay />);
+  const canvas = await ready();
+  fireEvent.click(screen.getByRole('button', { name: '地图工具' }));
+  fireEvent.click(screen.getByRole('button', { name: '在地图选择地块' }));
+  expect(canvas.closest('.map-layout')).toHaveAttribute(
+    'data-mobile-picking',
+    'true',
+  );
+  clickTile(canvas, origin);
+  expect(screen.getByText('已选 1 个地块')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '填写选区设置' }));
+  expect(canvas.closest('.map-layout')).toHaveAttribute(
+    'data-mobile-picking',
+    'false',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '在地图选择地块' }));
+  expect(screen.getByText('已选 1 个地块')).toBeInTheDocument();
+  clickTile(canvas, origin);
+  expect(screen.getByText('已选 0 个地块')).toBeInTheDocument();
+});

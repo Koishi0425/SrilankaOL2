@@ -151,6 +151,7 @@ function Dashboard({ me }: { me: MeData }) {
 
 export function App() {
   const [session, setSession] = useState<SessionState>({ kind: 'loading' });
+  const [mobileAccountOpen, setMobileAccountOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [globalAssistantOpen, setGlobalAssistantOpen] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -215,7 +216,19 @@ export function App() {
         <div className="brand">
           <h1>SrilankaOL</h1>
         </div>
-        <div className="header-actions">
+        <button
+          className="mobile-account-toggle"
+          aria-expanded={mobileAccountOpen}
+          aria-controls="account-actions"
+          onClick={() => setMobileAccountOpen((value) => !value)}
+        >
+          账号与设置
+        </button>
+        <div
+          id="account-actions"
+          className="header-actions"
+          data-mobile-open={mobileAccountOpen}
+        >
           {session.kind === 'ready' &&
             session.me.systemRole === 'Administrator' && (
               <button

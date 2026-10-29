@@ -109,6 +109,7 @@ const seasonNames = {
   Winter: '冬季',
 };
 
+import { MobileBack, useMobileDetail } from '../ui/mobile.js';
 export function SettlementPanel({
   game,
   active = true,
@@ -130,7 +131,12 @@ export function SettlementPanel({
   const readOnly = isGameReadOnly(game.status);
   const [rounds, setRounds] = useState<SettlementSummary[]>([]);
   const [data, setData] = useState<QuarterSettlement | null>(null);
+  const mobileDetail = useMobileDetail();
   const [selected, setSelected] = useState('public');
+  function openEntry(id: string) {
+    setSelected(id);
+    mobileDetail.open();
+  }
   const [queueQuery, setQueueQuery] = useState('');
   const [onlyUnfilled, setOnlyUnfilled] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -365,7 +371,7 @@ export function SettlementPanel({
       return;
     }
     if (data.actions.some((action) => action.actionId === focus.actionId)) {
-      setSelected(focus.actionId);
+      openEntry(focus.actionId);
       handledFocus.current = focus.key;
     }
   }, [active, focus, data, game.currentQuarter.id]);
@@ -540,6 +546,22 @@ export function SettlementPanel({
           .includes(queueQuery.trim().toLocaleLowerCase()),
     ) ?? [];
 
+  function nextUnfilled() {
+    if (!data) return;
+    const current = data.actions.findIndex(
+      (item) => item.actionId === selected,
+    );
+    const ordered = [
+      ...data.actions.slice(current + 1),
+      ...data.actions.slice(0, current + 1),
+    ];
+    const next = ordered.find((item) => !item.feedback.trim());
+    if (next) {
+      openEntry(next.actionId);
+      if (detailPane.current) detailPane.current.scrollTop = 0;
+    }
+  }
+
   return (
     <section className="work-center settlement-panel">
       <header className="center-heading">
@@ -687,7 +709,11 @@ export function SettlementPanel({
                 onChange={(economicBill) => modified({ ...data, economicBill })}
               />
             )}
-            <div className="center-layout">
+            <div
+              className="center-layout"
+              ref={mobileDetail.paneRef}
+              data-mobile-pane={mobileDetail.pane}
+            >
               <aside className="center-list" aria-label="待结算政策">
                 <div className="queue-tools">
                   <input
@@ -714,22 +740,7 @@ export function SettlementPanel({
                       已填写 {data.actions.length - missing} /{' '}
                       {data.actions.length}
                     </span>
-                    <button
-                      disabled={busy || !missing}
-                      onClick={() => {
-                        const current = data.actions.findIndex(
-                          (item) => item.actionId === selected,
-                        );
-                        const ordered = [
-                          ...data.actions.slice(current + 1),
-                          ...data.actions.slice(0, current + 1),
-                        ];
-                        const next = ordered.find(
-                          (item) => !item.feedback.trim(),
-                        );
-                        if (next) setSelected(next.actionId);
-                      }}
-                    >
+                    <button disabled={busy || !missing} onClick={nextUnfilled}>
                       下一项待填写
                     </button>
                   </div>
@@ -737,7 +748,7 @@ export function SettlementPanel({
                 <button
                   className={selected === 'public' ? 'center-list__active' : ''}
                   disabled={busy}
-                  onClick={() => setSelected('public')}
+                  onClick={() => openEntry('public')}
                 >
                   回合公报
                 </button>
@@ -763,7 +774,7 @@ export function SettlementPanel({
                             key={item.actionId}
                             aria-label={`${item.title} ${item.countryName} · ${item.feedback.trim() ? '已填写' : '未填写'}`}
                             disabled={busy}
-                            onClick={() => setSelected(item.actionId)}
+                            onClick={() => openEntry(item.actionId)}
                           >
                             <strong>{item.title}</strong>
                             <small>
@@ -790,6 +801,15 @@ export function SettlementPanel({
                 )}
               </aside>
               <div className="center-detail" ref={detailPane}>
+                <MobileBack onClick={mobileDetail.back}>结算列表</MobileBack>
+                <button
+                  type="button"
+                  className="mobile-next"
+                  disabled={busy || !missing}
+                  onClick={nextUnfilled}
+                >
+                  继续填写下一项
+                </button>
                 {!action ? (
                   <label>
                     回合公报（全员可见）
@@ -842,6 +862,25 @@ export function SettlementPanel({
                         审核意见：{action.reviewReason}
                       </p>
                     )}
+                    <label>
+                      政策结算反馈
+                      <textarea
+                        rows={12}
+                        maxLength={20_000}
+                        disabled={busy}
+                        value={action.feedback}
+                        onChange={(event) =>
+                          modified({
+                            ...data,
+                            actions: data.actions.map((item) =>
+                              item.actionId === action.actionId
+                                ? { ...item, feedback: event.target.value }
+                                : item,
+                            ),
+                          })
+                        }
+                      />
+                    </label>
                     <div className="settlement-feedback-tools">
                       {action.status === 'Approved' && onMapReveal && (
                         <div className="settlement-map-result">
@@ -913,25 +952,6 @@ export function SettlementPanel({
                         })
                       }
                     />
-                    <label>
-                      政策结算反馈
-                      <textarea
-                        rows={12}
-                        maxLength={20_000}
-                        disabled={busy}
-                        value={action.feedback}
-                        onChange={(event) =>
-                          modified({
-                            ...data,
-                            actions: data.actions.map((item) =>
-                              item.actionId === action.actionId
-                                ? { ...item, feedback: event.target.value }
-                                : item,
-                            ),
-                          })
-                        }
-                      />
-                    </label>
                   </div>
                 )}
                 {(!action || action.status === 'Approved') && (

@@ -752,3 +752,33 @@ it('keeps supplement feedback and locked formal documents visible without editab
   ).not.toBeInTheDocument();
   expect(screen.queryByLabelText('具体政策')).not.toBeInTheDocument();
 });
+
+it('returns to the phone review queue without losing unsubmitted review text', async () => {
+  vi.mocked(api.fetchRoundPolicies).mockResolvedValue([formal]);
+  const page = render(hostView());
+  const entry = await screen.findByRole('button', { name: /康提 · 玩家甲/ });
+  expect(page.container.querySelector('[data-mobile-pane]')).toHaveAttribute(
+    'data-mobile-pane',
+    'list',
+  );
+  fireEvent.click(entry);
+  await waitFor(() =>
+    expect(screen.getByLabelText('整份审核意见')).toBeEnabled(),
+  );
+  fireEvent.change(screen.getByLabelText('整份审核意见'), {
+    target: { value: '返回列表也保留' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /玩家政策列表/ }));
+  expect(page.container.querySelector('[data-mobile-pane]')).toHaveAttribute(
+    'data-mobile-pane',
+    'list',
+  );
+  fireEvent.click(entry);
+  await waitFor(() =>
+    expect(screen.getByLabelText('整份审核意见')).toHaveValue('返回列表也保留'),
+  );
+  expect(page.container.querySelector('[data-mobile-pane]')).toHaveAttribute(
+    'data-mobile-pane',
+    'detail',
+  );
+});

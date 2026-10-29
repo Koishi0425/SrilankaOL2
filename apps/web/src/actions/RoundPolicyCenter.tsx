@@ -52,6 +52,7 @@ const newSection = (): RoundPolicySectionInput => ({
 const message = (error: unknown) =>
   error instanceof Error ? error.message : '操作失败，请重试。';
 
+import { MobileBack, useMobileDetail } from '../ui/mobile.js';
 export function RoundPolicyCenter({
   game,
   rules,
@@ -112,6 +113,7 @@ export function RoundPolicyCenter({
   const editable = !!policy?.canEdit && !host && !readOnly && !candidate;
   const quarter = game.currentQuarter;
   const current = policy?.quarterId === quarter.id;
+  const mobileDetail = useMobileDetail();
   const selectedKey = policy ? policyKey(policy) : '';
   const reviewDraft = useReviewDrafts(game.id, policy, host);
   const note = reviewDraft.note;
@@ -216,6 +218,7 @@ export function RoundPolicyCenter({
       live.current.dirty
     )
       return;
+    mobileDetail.open();
     handledFocus.current = focus.key;
     const token = ++generation.current;
     openingRequest.current = token;
@@ -347,6 +350,7 @@ export function RoundPolicyCenter({
   });
 
   async function open(item: RoundPolicySummary) {
+    mobileDetail.open();
     if (pending.current) return;
     const token = ++generation.current;
     openingRequest.current = token;
@@ -577,7 +581,11 @@ export function RoundPolicyCenter({
         </button>
       )}
       {notice && <p role="status">{notice}</p>}
-      <div className={`center-layout${host ? '' : ' round-policy-player'}`}>
+      <div
+        ref={mobileDetail.paneRef}
+        data-mobile-pane={host ? mobileDetail.pane : undefined}
+        className={`center-layout${host ? '' : ' round-policy-player'}`}
+      >
         {host && (
           <aside className="center-list" aria-label="玩家回合政策">
             <div className="queue-tools">
@@ -630,6 +638,9 @@ export function RoundPolicyCenter({
           </aside>
         )}
         <div className="center-detail">
+          {host && (
+            <MobileBack onClick={mobileDetail.back}>玩家政策列表</MobileBack>
+          )}
           {(!loaded || opening) && !error ? (
             <LoadingSkeleton label="正在读取本回合政策…" />
           ) : !policy ? (
@@ -707,7 +718,7 @@ export function RoundPolicyCenter({
                 </div>
               )}
               {!host && editable && (
-                <div className="quarter-actions">
+                <div className="quarter-actions mobile-policy-actions">
                   <button
                     disabled={busy}
                     onClick={() => {
