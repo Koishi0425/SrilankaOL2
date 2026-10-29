@@ -5,6 +5,9 @@ import { fetchMapHistory } from '../api.js';
 const names: Record<string, string> = {
   Correction: '结算更正',
   CreateMap: '创建地图',
+  GenerateMap: '生成地形',
+  TileTags: '地块状态',
+  TileTagPeriod: '状态回合更新',
   EditTiles: '批量布置',
   EditProvince: '设置省份资料',
   EditTile: '修改地块',

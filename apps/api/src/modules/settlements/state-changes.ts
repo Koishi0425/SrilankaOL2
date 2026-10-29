@@ -14,6 +14,8 @@ import { lockMap, recordMapChange } from '../world/map-mutations.js';
 import { readTradeZones } from '../trade/trade-data.js';
 import { validTradePower } from '../trade/trade-service.js';
 
+import { tagBaseline, applyTileTag } from '../world/tile-tags.js';
+
 type Baseline = { id: string; values: Record<string, unknown> };
 export interface StoredStateChange {
   change: SettlementStateChange;
@@ -35,17 +37,17 @@ export async function publishTerritoryKnowledge(
     }));
     await db.query(
       `UPDATE country_tile_knowledge k SET
-      snapshot=COALESCE(k.snapshot,'{}'::jsonb)
+      snapshot=COALESCE(k.snapshot,'{}'::jsonb)||jsonb_build_object('dynamicKnown',true)
         || CASE WHEN $3::boolean THEN jsonb_build_object('controllerCountryId',t.controller_country_id,'controllerCountryName',c.name,'controllerColor',c.map_color) ELSE '{}'::jsonb END
         || CASE WHEN $4::boolean THEN jsonb_build_object('legalOwnerCountryId',t.legal_owner_country_id,'legalOwnerCountryName',l.name,'legalOwnerColor',l.map_color) ELSE '{}'::jsonb END,
-      discovery_state=CASE WHEN k.discovery_state='Mapped' THEN 'Outdated' ELSE k.discovery_state END,
+      discovery_state=CASE WHEN k.discovery_state='Mapped' THEN 'Mapped' ELSE k.discovery_state END,
       updated_at=NOW()
       FROM hex_tiles t
       LEFT JOIN countries c ON c.game_id=t.game_id AND c.id=t.controller_country_id
       LEFT JOIN countries l ON l.game_id=t.game_id AND l.id=t.legal_owner_country_id
       JOIN jsonb_to_recordset($5::jsonb) p("tileId" uuid,"controllerCountryId" uuid,"legalOwnerCountryId" uuid) ON p."tileId"=t.id
       WHERE k.game_id=$1 AND t.game_id=k.game_id AND k.tile_id=t.id AND t.id=ANY($2::uuid[])
-        AND k.discovery_state IN ('Mapped','Observed','Outdated')
+        AND k.discovery_state IN ('Mapped','Observed')
         AND k.country_id IN (t.controller_country_id,t.legal_owner_country_id,p."controllerCountryId",p."legalOwnerCountryId")`,
       [
         gameId,
@@ -63,6 +65,8 @@ function invalid(message: string) {
 }
 
 function target(change: SettlementStateChangeInput) {
+  if (change.kind === 'TileTag')
+    return `TileTag:${change.tag.name.trim()}:${[...change.tileIds].sort().join(',')}`;
   if (change.kind === 'TradeInfluence')
     return `TradeInfluence:${change.zoneId}:${change.countryId}`;
   if (change.kind === 'Province')
@@ -73,6 +77,8 @@ function target(change: SettlementStateChangeInput) {
 }
 
 function keys(change: SettlementStateChangeInput) {
+  if (change.kind === 'TileTag')
+    return change.tileIds.map((id) => `tag:${id}:${change.tag.name.trim()}`);
   if (change.kind === 'Province')
     return provinceStatFields
       .filter((key) => change.values[key] !== undefined)
@@ -97,7 +103,7 @@ export async function stateOptions(
     [gameId],
   );
   const tiles = await db.query<SettlementStateOptions['tiles'][number]>(
-    'SELECT id,q,r,passable FROM hex_tiles WHERE game_id=$1 ORDER BY r,q',
+    'SELECT t.id,t.q,t.r,t.passable,r.province_id AS "provinceId" FROM hex_tiles t LEFT JOIN regions r ON r.game_id=t.game_id AND r.id=t.region_id WHERE t.game_id=$1 ORDER BY t.r,t.q',
     [gameId],
   );
   const armies = await db.query<SettlementStateOptions['armies'][number]>(
@@ -176,6 +182,20 @@ async function describeChange(
   gameId: string,
   input: SettlementStateChangeInput,
 ): Promise<StoredStateChange> {
+  if (input.kind === 'TileTag') {
+    const before = await tagBaseline(db, gameId, input);
+    return {
+      change: {
+        ...toStateChangeInput(input),
+        kind: 'TileTag',
+        tileIds: input.tileIds,
+        operation: input.operation,
+        tag: { ...input.tag, name: input.tag.name.trim() },
+        summary: `${input.tileIds.length} 格：${input.operation === 'Remove' ? '移除' : '设置'} ${input.tag.name.trim()}${input.operation === 'Set' ? '（下回合生效）' : ''}`,
+      },
+      before,
+    };
+  }
   if (input.kind === 'TradeInfluence') {
     if (
       !validTradePower(input.power) ||
@@ -427,6 +447,11 @@ function assertBaseline(saved: StoredStateChange, current: StoredStateChange) {
 }
 
 function hasEffect({ change, before }: StoredStateChange) {
+  if (change.kind === 'TileTag')
+    return (
+      change.operation === 'Set' ||
+      before.some((item) => item.values.tag !== null)
+    );
   if (change.kind === 'TradeInfluence')
     return before[0]!.values.power !== change.power;
   if (change.kind === 'Province')
@@ -562,6 +587,9 @@ export async function publishStateChanges(
         [gameId, change.armyId, change.strength],
       );
       tiles.add(army.rows[0]!.tile_id);
+    } else if (change.kind === 'TileTag') {
+      await applyTileTag(db, gameId, map.quarter.sequence_number + 1, change);
+      change.tileIds.forEach((id) => tiles.add(id));
     } else if (change.kind === 'TradeInfluence') {
       await db.query(
         'INSERT INTO trade_influences(game_id,zone_id,country_id,power) VALUES($1,$2,$3,$4) ON CONFLICT(game_id,zone_id,country_id) DO UPDATE SET power=EXCLUDED.power',

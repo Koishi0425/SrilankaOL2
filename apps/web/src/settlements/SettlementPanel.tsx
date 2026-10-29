@@ -1,3 +1,4 @@
+import { TileTagChangeEditor } from './TileTagChangeEditor.js';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ResultAudienceEditor,
@@ -1019,21 +1020,37 @@ export function SettlementPanel({
                   />
                 )}
                 {(!action || action.status === 'Approved') && (
-                  <StateChangeEditor
-                    key={`${data.quarter.id}:${selected}`}
-                    gameId={game.id}
-                    quarterId={data.quarter.id}
-                    actionId={action?.actionId ?? null}
-                    refs={action?.refs}
-                    changes={data.stateChanges ?? []}
-                    revision={data.mapRevision}
-                    busy={busy}
-                    active={active}
-                    onChange={(stateChanges) =>
-                      modified({ ...data, stateChanges })
-                    }
-                    onRevision={updateMapRevision}
-                  />
+                  <>
+                    <TileTagChangeEditor
+                      key={`tags:${data.quarter.id}:${selected}`}
+                      gameId={game.id}
+                      quarterId={data.quarter.id}
+                      actionId={action?.actionId ?? null}
+                      changes={data.stateChanges ?? []}
+                      busy={busy}
+                      refs={action?.refs ?? []}
+                      revision={data.mapRevision}
+                      onRevision={updateMapRevision}
+                      onChange={(stateChanges) =>
+                        modified({ ...data, stateChanges })
+                      }
+                    />
+                    <StateChangeEditor
+                      key={`${data.quarter.id}:${selected}`}
+                      gameId={game.id}
+                      quarterId={data.quarter.id}
+                      actionId={action?.actionId ?? null}
+                      refs={action?.refs}
+                      changes={data.stateChanges ?? []}
+                      revision={data.mapRevision}
+                      busy={busy}
+                      active={active}
+                      onChange={(stateChanges) =>
+                        modified({ ...data, stateChanges })
+                      }
+                      onRevision={updateMapRevision}
+                    />
+                  </>
                 )}
                 {(!action || action.status === 'Approved') && (
                   <DiplomacyEditor

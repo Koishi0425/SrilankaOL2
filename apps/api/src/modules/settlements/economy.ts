@@ -12,7 +12,11 @@ import type { DatabaseClient } from '@srilanka/database';
 import { ApiFault } from '../../errors.js';
 import { readTradeZones } from '../trade/trade-data.js';
 import { calculateTrade } from '../trade/trade-calculation.js';
-import { nationalPolicyStatus } from '@srilanka/contracts';
+import {
+  tileTagWeight,
+  type TileTag,
+  nationalPolicyStatus,
+} from '@srilanka/contracts';
 import { readNationalPolicies } from '../government/government-service.js';
 import {
   validBalance,
@@ -57,7 +61,12 @@ export interface EconomicSnapshot {
     manpowerBase: number;
     autonomy: number;
     tileCount: number;
-    eligible: Array<{ countryId: string; tileCount: number }>;
+    eligible: Array<{
+      countryId: string;
+      tileCount: number;
+      taxWeight?: number;
+      productionWeight?: number;
+    }>;
   }>;
   armies: Array<{
     id: string;
@@ -142,10 +151,11 @@ export async function captureEconomicSnapshot(
     const tiles = (
       await db.query<{
         province_id: string;
+        tags: TileTag[];
         legal_owner_country_id: string | null;
         controller_country_id: string | null;
       }>(
-        'SELECT r.province_id,t.legal_owner_country_id,t.controller_country_id FROM hex_tiles t JOIN regions r ON r.game_id=t.game_id AND r.id=t.region_id WHERE t.game_id=$1 AND r.province_id IS NOT NULL',
+        'SELECT r.province_id,map_tile_tags(t.id) AS tags,t.legal_owner_country_id,t.controller_country_id FROM hex_tiles t JOIN regions r ON r.game_id=t.game_id AND r.id=t.region_id WHERE t.game_id=$1 AND r.province_id IS NOT NULL',
         [gameId],
       )
     ).rows;
@@ -178,6 +188,20 @@ export async function captureEconomicSnapshot(
         eligible: [...eligible].map(([countryId, tileCount]) => ({
           countryId,
           tileCount,
+          taxWeight: group
+            .filter(
+              (t) =>
+                t.legal_owner_country_id === countryId &&
+                t.controller_country_id === countryId,
+            )
+            .reduce((sum, t) => sum + tileTagWeight(t.tags, 'Tax'), 0),
+          productionWeight: group
+            .filter(
+              (t) =>
+                t.legal_owner_country_id === countryId &&
+                t.controller_country_id === countryId,
+            )
+            .reduce((sum, t) => sum + tileTagWeight(t.tags, 'Production'), 0),
         })),
       };
     });
@@ -265,12 +289,21 @@ export function calculateEconomy(
               : kind === 'Production'
                 ? snapshot.rules.productionCoefficient
                 : snapshot.rules.manpowerCoefficient;
+          const allocation = p.eligible.find(
+            (e) => e.countryId === country.id,
+          )!;
+          const weight =
+            kind === 'Tax'
+              ? (allocation.taxWeight ?? eligible * 10000)
+              : kind === 'Production'
+                ? (allocation.productionWeight ?? eligible * 10000)
+                : eligible * 10000;
           const numerator =
             BigInt(base) *
             rate(coefficient) *
             (10000n - rate(p.autonomy)) *
-            BigInt(eligible);
-          const denominator = 10000n * BigInt(p.tileCount);
+            BigInt(weight);
+          const denominator = 10000n * BigInt(p.tileCount) * 10000n;
           // Monetary outputs round per province to cents; manpower floors per province/country.
           const amount =
             kind === 'ManpowerGrowth'
@@ -278,7 +311,7 @@ export function calculateEconomy(
               : Number(roundDivide(numerator, denominator)) / 100;
           sources.push({
             name: p.name,
-            calculation: `${base} × ${coefficient} × ${(100 - p.autonomy) / 100} × ${eligible}/${p.tileCount}`,
+            calculation: `${base} × ${coefficient} × ${(100 - p.autonomy) / 100} × ${weight / 10000}/${p.tileCount}${weight !== eligible * 10000 ? '（含地块状态修正）' : ''}`,
             amount,
           });
         }

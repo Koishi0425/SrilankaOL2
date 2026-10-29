@@ -33,6 +33,9 @@ import type {
   MapBatchInput,
   MapKnowledgeInput,
   MapSetupData,
+  CreateMapInput,
+  MapGenerationOptions,
+  TileTagChange,
   MapRevealPlan,
   MapHistoryEntry,
   MapSearchResult,
@@ -1006,13 +1009,35 @@ export async function publishSettlement(
 export async function fetchMapSetup(gameId: string) {
   return (await apiRequest<MapSetupData>(`/games/${gameId}/map/setup`)).data;
 }
-export async function createMap(
-  gameId: string,
-  input: { name: string; width: number; height: number },
-) {
+export async function createMap(gameId: string, input: CreateMapInput) {
   return (
     await apiRequest<MapSetupData>(`/games/${gameId}/map`, {
       method: 'POST',
+      body: JSON.stringify(input),
+    })
+  ).data;
+}
+export async function generateMapTerrain(
+  gameId: string,
+  input: MapGenerationOptions & { expectedRevision: number },
+) {
+  return (
+    await apiRequest<MapSetupData>(`/games/${gameId}/map/generate`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  ).data;
+}
+export async function changeTileTags(
+  gameId: string,
+  input: TileTagChange & {
+    expectedRevision: number;
+    correctionReason?: string;
+  },
+) {
+  return (
+    await apiRequest<MapSetupData>(`/games/${gameId}/map/tags`, {
+      method: 'PATCH',
       body: JSON.stringify(input),
     })
   ).data;

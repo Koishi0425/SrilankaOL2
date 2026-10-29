@@ -21,19 +21,15 @@ describe('map modes and independent terrain symbols', () => {
   it('lights only the current detection area and keeps exchanged or old maps under fog', () => {
     for (const mode of ['political', 'terrain'] as const) {
       expect(fogOpacity(tile, mode)).toBe(0);
-      for (const discoveryState of [
-        'Mapped',
-        'Discovered',
-        'Outdated',
-      ] as const)
+      for (const discoveryState of ['Mapped'] as const)
         expect(fogOpacity({ ...tile, discoveryState }, mode)).toBe(0.35);
       expect(
         fogOpacity({ ...tile, discoveryState: 'Unknown' }, mode),
       ).toBeGreaterThan(0.35);
     }
-    expect(
-      fogOpacity({ ...tile, discoveryState: 'Outdated' }, 'knowledge'),
-    ).toBe(0);
+    expect(fogOpacity({ ...tile, discoveryState: 'Mapped' }, 'knowledge')).toBe(
+      0,
+    );
   });
   it('keeps the owner as the base color and overlays occupation without replacing terrain symbols', () => {
     expect(tileAppearance(tile, 'political', countries)).toEqual({
@@ -63,12 +59,7 @@ describe('map modes and independent terrain symbols', () => {
     ).toBeNull();
   });
   it('does not reveal control from states that cannot show political information', () => {
-    for (const discoveryState of [
-      'Unknown',
-      'Rumored',
-      'Discovered',
-      'Mapped',
-    ] as const) {
+    for (const discoveryState of ['Unknown', 'Mapped'] as const) {
       const appearance = tileAppearance(
         { ...tile, discoveryState },
         'political',
@@ -82,7 +73,7 @@ describe('map modes and independent terrain symbols', () => {
     expect(
       terrainSymbol({ terrainKey: 'plains', discoveryState: 'Observed' }),
     ).toBeNull();
-    for (const state of ['Unknown', 'Rumored'] as const) {
+    for (const state of ['Unknown'] as const) {
       expect(terrainSymbol({ ...tile, discoveryState: state })).toBeNull();
       expect(
         tileAppearance(
@@ -96,25 +87,27 @@ describe('map modes and independent terrain symbols', () => {
       '山地',
     );
   });
-  it('resolves legacy owner names without treating the occupying country as the owner', () => {
-    const legacy = {
-      ...tile,
-      legalOwnerCountryId: undefined,
-      legalOwnerColor: undefined,
-      discoveryState: 'Outdated' as const,
-    };
-    expect(tileAppearance(legacy, 'political', countries)).toEqual({
-      color: '#112233',
-      group: 'north',
-      occupation: { color: '#998877', name: '南国' },
-    });
-    const unknown = { ...legacy, legalOwnerCountryName: null };
-    expect(tileAppearance(unknown, 'political', countries).group).toBeNull();
+  it('uses recorded ownership only when dynamic knowledge exists', () => {
     expect(
-      tileAppearance(unknown, 'political', countries).occupation,
+      tileAppearance(
+        { ...tile, discoveryState: 'Mapped', dynamicKnown: true },
+        'political',
+        countries,
+      ).group,
+    ).toBe('north');
+    expect(
+      tileAppearance(
+        { ...tile, discoveryState: 'Mapped', dynamicKnown: false },
+        'political',
+        countries,
+      ).group,
     ).toBeNull();
-    expect(tileAppearance(unknown, 'political', countries).color).not.toBe(
-      '#998877',
-    );
+    expect(
+      tileAppearance(
+        { ...tile, legalOwnerCountryId: undefined },
+        'political',
+        countries,
+      ).occupation,
+    ).toBeNull();
   });
 });

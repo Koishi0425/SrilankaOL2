@@ -488,3 +488,23 @@ it('keeps map selection while switching between the phone map and setup form', a
   clickTile(canvas, origin);
   expect(screen.getByText('已选 0 个地块')).toBeInTheDocument();
 });
+
+it('adds a brush area, erases it and leaves map writes to the batch form', async () => {
+  render(<HexMap game={game} countries={[]} overlay />);
+  const canvas = await ready();
+  fireEvent.click(screen.getByRole('button', { name: '地图工具' }));
+  fireEvent.change(screen.getByLabelText('选区操作'), {
+    target: { value: 'add' },
+  });
+  fireEvent.change(screen.getByLabelText('笔刷大小'), {
+    target: { value: '2' },
+  });
+  clickTile(canvas, origin);
+  expect(screen.getByText('已选 2 个地块')).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('选区操作'), {
+    target: { value: 'erase' },
+  });
+  clickTile(canvas, origin);
+  expect(screen.getByText('已选 0 个地块')).toBeInTheDocument();
+  expect(fetchTile).not.toHaveBeenCalled();
+});

@@ -820,7 +820,7 @@ describe('map preparation and exploration', () => {
     await batch({ terrainTypeId: forest.id, controllerCountryId: null });
     const perceived = await world.getTile(gameId, playerId, tiles[0]!);
     expect(perceived).toMatchObject({
-      discoveryState: 'Outdated',
+      discoveryState: 'Mapped',
       terrainName: '平原',
       controllerCountryId: otherCountryId,
       provinceName: '边省',
@@ -886,7 +886,7 @@ describe('map preparation and exploration', () => {
     });
     const old = (await viewport(playerId)).tiles[0]!;
     expect(old).toMatchObject({
-      discoveryState: 'Outdated',
+      discoveryState: 'Mapped',
       legalOwnerCountryId: countryId,
       legalOwnerColor: known.legalOwnerColor,
       controllerCountryId: otherCountryId,
@@ -906,12 +906,7 @@ describe('map preparation and exploration', () => {
       maxR: 0,
     });
     expect(preview.tiles[0]).toEqual(old);
-    for (const state of [
-      'Unknown',
-      'Rumored',
-      'Discovered',
-      'Mapped',
-    ] as const) {
+    for (const state of ['Unknown', 'Unknown', 'Mapped', 'Mapped'] as const) {
       await knowledge({ state });
       expect((await viewport(playerId)).tiles[0]).toMatchObject({
         legalOwnerCountryId: null,
@@ -1045,7 +1040,7 @@ describe('map preparation and exploration', () => {
     expect(result.mapReveals?.[0]?.publishedAt).toBeTruthy();
     expect(
       (await world.getTile(gameId, playerId, tiles[0]!)).discoveryState,
-    ).toBe('Outdated');
+    ).toBe('Mapped');
     expect(
       (await world.getTile(gameId, playerId, tiles[0]!)).cities.map(
         (city) => city.name,
@@ -1119,4 +1114,58 @@ describe('map preparation and exploration', () => {
     ).toBe(true);
     expect(await world.setup.history(gameId, playerId)).toEqual([]);
   });
+});
+
+it('publishes tile tags for the next quarter, refreshes map revisions, and expires them after one quarter', async () => {
+  async function finish(id: string, tag = false) {
+    for (const state of ['ActionSubmission', 'Locked', 'HostReview'] as const)
+      await games.transitionCurrentQuarter({ gameId, userId: hostId, state });
+    await settlements.begin(gameId, hostId, id);
+    const current = await settlements.get(gameId, hostId, id);
+    const saved = await settlements.save(gameId, hostId, id, {
+      expectedVersion: current.version,
+      expectedMapRevision: await revision(),
+      publicReport: '回合结束',
+      results: [],
+      stateChanges: tag
+        ? [
+            {
+              id: randomUUID(),
+              actionId: null,
+              kind: 'TileTag',
+              operation: 'Set',
+              tileIds: [tiles[0]!],
+              tag: {
+                name: '丰收',
+                description: '本季丰收',
+                taxPercent: 0,
+                productionPercent: 25,
+                blocksObservation: false,
+                duration: 1,
+              },
+            },
+          ]
+        : [],
+    });
+    await settlements.publish(
+      gameId,
+      hostId,
+      id,
+      saved.version,
+      saved.mapRevision,
+    );
+  }
+  await finish(quarterId, true);
+  expect((await world.getTile(gameId, hostId, tiles[0]!)).tags).toEqual([]);
+  const before = await revision();
+  const next = await settlements.advance(gameId, hostId, quarterId);
+  expect(await revision()).toBeGreaterThan(before);
+  expect(
+    (await world.getTile(gameId, hostId, tiles[0]!)).tags?.[0],
+  ).toMatchObject({ name: '丰收', startsSequence: 2, endsSequence: 2 });
+  await finish(next.id);
+  const ending = await revision();
+  await settlements.advance(gameId, hostId, next.id);
+  expect(await revision()).toBeGreaterThan(ending);
+  expect((await world.getTile(gameId, hostId, tiles[0]!)).tags).toEqual([]);
 });

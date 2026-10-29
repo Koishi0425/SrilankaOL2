@@ -6,6 +6,19 @@ import { requireUser, sendApiError } from '../auth/auth-routes.js';
 import type { WorldService } from './world-service.js';
 import { registerProvinceRoutes } from './province-routes.js';
 
+import { tagChangeFields } from './tile-tags.js';
+
+const generationSchema = z.object({
+  mapType: z.enum(['Pangaea', 'Continents', 'Archipelago', 'InlandSea']),
+  seed: z.string().trim().min(1).max(80),
+  seaLevel: z.enum(['Low', 'Normal', 'High']),
+  rainfall: z.enum(['Dry', 'Normal', 'Wet']),
+  worldAge: z.enum(['Young', 'Normal', 'Old']),
+  countryIds: z
+    .array(z.string().uuid())
+    .max(20)
+    .refine((ids) => new Set(ids).size === ids.length),
+});
 const gameParams = z.object({ gameId: z.string().uuid() });
 const tileParams = gameParams.extend({ tileId: z.string().uuid() });
 const armyParams = gameParams.extend({ armyId: z.string().uuid() });
@@ -138,6 +151,7 @@ export async function registerWorldRoutes(
         name: z.string().trim().min(1).max(120),
         width: z.number().int().min(1).max(100),
         height: z.number().int().min(1).max(100),
+        generation: generationSchema.optional(),
       }),
       request.body,
     );
@@ -150,6 +164,41 @@ export async function registerWorldRoutes(
           await world.setup.create(params.gameId, user.id, body),
         ),
       );
+  });
+  app.post('/api/v1/games/:gameId/map/generate', async (request, reply) => {
+    const user = await requireUser(request, reply, auth);
+    const params = parsed(request, reply, gameParams, request.params);
+    const body = parsed(
+      request,
+      reply,
+      generationSchema.extend({ expectedRevision: revision }),
+      request.body,
+    );
+    if (!user || !params || !body) return reply;
+    return reply.send(
+      envelope(
+        request,
+        await world.setup.generate(params.gameId, user.id, body),
+      ),
+    );
+  });
+  app.patch('/api/v1/games/:gameId/map/tags', async (request, reply) => {
+    const user = await requireUser(request, reply, auth),
+      params = parsed(request, reply, gameParams, request.params);
+    const body = parsed(
+      request,
+      reply,
+      z.object({
+        ...tagChangeFields,
+        expectedRevision: revision,
+        correctionReason: correctionFields.correctionReason,
+      }),
+      request.body,
+    );
+    if (!user || !params || !body) return reply;
+    return reply.send(
+      envelope(request, await world.setup.tags(params.gameId, user.id, body)),
+    );
   });
   app.patch('/api/v1/games/:gameId/map/tiles', async (request, reply) => {
     const user = await requireUser(request, reply, auth);
@@ -194,14 +243,7 @@ export async function registerWorldRoutes(
           expectedRevision: revision,
           countryId: z.string().uuid(),
           tileIds: tileSelection,
-          state: z.enum([
-            'Unknown',
-            'Rumored',
-            'Discovered',
-            'Mapped',
-            'Observed',
-            'Outdated',
-          ]),
+          state: z.enum(['Unknown', 'Mapped', 'Observed']),
           note: z.string().trim().max(2000),
           armyErrorPercent: z.number().int().min(0).max(100).optional(),
           sourceActionId: z.string().uuid().optional(),

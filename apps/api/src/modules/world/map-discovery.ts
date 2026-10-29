@@ -88,13 +88,18 @@ export async function applyObservation(
 ) {
   await db.query(
     `INSERT INTO country_tile_knowledge (id, game_id, country_id, tile_id, discovery_state, confidence, observed_world_version, snapshot, public_note, observed_at)
-    SELECT gen_random_uuid(), $1, $2, x."tileId",
-      CASE WHEN $3='Observed' AND $4<>(SELECT current_world_version FROM games WHERE id=$1) THEN 'Outdated' ELSE $3 END,
-      CASE WHEN $3 IN ('Unknown','Rumored') THEN NULL ELSE 100 END, $4, x.snapshot, $5, $6
-    FROM jsonb_to_recordset($7::jsonb) AS x("tileId" uuid, snapshot jsonb)
-    ON CONFLICT (game_id, country_id, tile_id) DO UPDATE SET discovery_state = EXCLUDED.discovery_state, confidence = EXCLUDED.confidence,
-      observed_world_version = EXCLUDED.observed_world_version, snapshot = EXCLUDED.snapshot, public_note = EXCLUDED.public_note,
-      observed_at = EXCLUDED.observed_at, updated_at = NOW()`,
+    SELECT gen_random_uuid(),$1,$2,x."tileId",CASE WHEN $3='Unknown' THEN 'Unknown' ELSE 'Mapped' END,
+      CASE WHEN $3='Unknown' THEN NULL ELSE 100 END,$4,
+      CASE WHEN $3='Unknown' THEN '{}'::jsonb
+        WHEN $3='Observed' THEN x.snapshot||jsonb_build_object('dynamicKnown',true)
+        ELSE COALESCE(k.snapshot,'{}'::jsonb)||(x.snapshot-ARRAY['tags','controllerCountryId','controllerCountryName','controllerColor','legalOwnerCountryId','legalOwnerCountryName','legalOwnerColor','occupierCountryName','automaticObservation','dynamicKnown','observationSequence'])
+          ||jsonb_build_object('dynamicKnown',COALESCE((k.snapshot->>'dynamicKnown')::boolean,false),'tags',COALESCE(k.snapshot->'tags','[]'::jsonb)) END,
+      $5,CASE WHEN $3='Observed' THEN $6::timestamptz WHEN $3='Unknown' THEN NULL ELSE k.observed_at END
+    FROM jsonb_to_recordset($7::jsonb) AS x("tileId" uuid,snapshot jsonb)
+    LEFT JOIN country_tile_knowledge k ON k.game_id=$1 AND k.country_id=$2 AND k.tile_id=x."tileId"
+    ON CONFLICT(game_id,country_id,tile_id) DO UPDATE SET discovery_state=EXCLUDED.discovery_state,confidence=EXCLUDED.confidence,
+      observed_world_version=EXCLUDED.observed_world_version,snapshot=EXCLUDED.snapshot,public_note=EXCLUDED.public_note,
+      observed_at=EXCLUDED.observed_at,updated_at=NOW()`,
     [
       input.gameId,
       input.countryId,
@@ -109,7 +114,7 @@ export async function applyObservation(
             ...tile.snapshot,
             administrationKnown:
               tile.snapshot.administrationKnown ??
-              ['Mapped', 'Observed', 'Outdated'].includes(input.state),
+              ['Mapped', 'Observed'].includes(input.state),
           },
         })),
       ),

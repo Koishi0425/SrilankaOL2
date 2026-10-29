@@ -1,3 +1,4 @@
+import { tileTagWeight, type TileTag } from '@srilanka/contracts';
 import { nationalPolicyStatus, treatyStatus } from '@srilanka/contracts';
 import type {
   MapTileContext,
@@ -78,7 +79,7 @@ export async function readMapTileContext(
         ).rows
       : (
           await db.query<{ id: string; q: number; r: number }>(
-            `SELECT t.id,t.q,t.r FROM country_tile_knowledge k JOIN hex_tiles t ON t.game_id=k.game_id AND t.id=k.tile_id WHERE k.game_id=$1 AND k.country_id=$2 AND k.discovery_state IN ('Mapped','Observed','Outdated') AND ${knownAdministrationSql} AND k.snapshot->>'provinceName'=$3 ORDER BY t.r,t.q`,
+            `SELECT t.id,t.q,t.r FROM country_tile_knowledge k JOIN hex_tiles t ON t.game_id=k.game_id AND t.id=k.tile_id WHERE k.game_id=$1 AND k.country_id=$2 AND k.discovery_state IN ('Mapped','Observed') AND ${knownAdministrationSql} AND k.snapshot->>'provinceName'=$3 ORDER BY t.r,t.q`,
             [gameId, view.countryId, tile.provinceName],
           )
         ).rows;
@@ -147,6 +148,12 @@ export async function readMapTileContext(
         )
       ).rows[0]!.count,
     );
+    const knownTags = (
+      await db.query<{ tags: TileTag[] }>(
+        `SELECT CASE WHEN $4::boolean THEN map_tile_tags(t.id) ELSE COALESCE(k.snapshot->'tags','[]'::jsonb) END AS tags FROM hex_tiles t JOIN regions r ON r.game_id=t.game_id AND r.id=t.region_id LEFT JOIN country_tile_knowledge k ON k.game_id=t.game_id AND k.tile_id=t.id AND k.country_id=$3 WHERE t.game_id=$1 AND r.province_id=$2 AND t.legal_owner_country_id=$3 AND t.controller_country_id=$3`,
+        [gameId, province.id, owner.id, host],
+      )
+    ).rows;
     const lines = calculateEconomy({
       capturedAt: '',
       worldVersion: 0,
@@ -159,7 +166,20 @@ export async function readMapTileContext(
           name: province.name,
           ...values,
           tileCount: Number(province.tile_count),
-          eligible: [{ countryId: owner.id, tileCount: eligible }],
+          eligible: [
+            {
+              countryId: owner.id,
+              tileCount: eligible,
+              taxWeight: knownTags.reduce(
+                (sum, t) => sum + tileTagWeight(t.tags, 'Tax'),
+                0,
+              ),
+              productionWeight: knownTags.reduce(
+                (sum, t) => sum + tileTagWeight(t.tags, 'Production'),
+                0,
+              ),
+            },
+          ],
         },
       ],
       armies: [],

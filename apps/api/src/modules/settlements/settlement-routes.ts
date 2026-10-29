@@ -11,6 +11,8 @@ import {
   treasurySchema,
 } from '../games/country-routes.js';
 
+import { tagChangeFields } from '../world/tile-tags.js';
+
 const paramsSchema = z.object({
   gameId: z.string().uuid(),
   quarterId: z.string().uuid(),
@@ -24,6 +26,7 @@ const changeBase = {
   actionId: z.string().uuid().nullable(),
 };
 const stateChangeSchema = z.discriminatedUnion('kind', [
+  z.object({ ...changeBase, kind: z.literal('TileTag'), ...tagChangeFields }),
   z.object({
     ...changeBase,
     kind: z.literal('TradeInfluence'),

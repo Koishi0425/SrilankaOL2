@@ -8,11 +8,8 @@ export const mapModes: Record<MapMode, string> = {
 };
 export const discoveryStyles = {
   Unknown: { label: '未知', color: '#cbd2d4' },
-  Rumored: { label: '传闻', color: '#d8c9ac' },
-  Discovered: { label: '已发现', color: '#c1d5ad' },
-  Mapped: { label: '已测绘', color: '#96bdd3' },
-  Observed: { label: '当前可见', color: '#7fa890' },
-  Outdated: { label: '旧情报', color: '#cba77e' },
+  Mapped: { label: '已知', color: '#96bdd3' },
+  Observed: { label: '可见', color: '#7fa890' },
 } satisfies Record<
   MapTileSummary['discoveryState'],
   { label: string; color: string }
@@ -39,16 +36,13 @@ export function fogOpacity(
   mode: MapMode,
 ) {
   if (mode === 'knowledge' || tile.discoveryState === 'Observed') return 0;
-  return tile.discoveryState === 'Unknown' || tile.discoveryState === 'Rumored'
-    ? 0.65
-    : 0.35;
+  return tile.discoveryState === 'Unknown' ? 0.65 : 0.35;
 }
 
 export function terrainSymbol(
   tile: Pick<MapTileSummary, 'terrainKey' | 'discoveryState'>,
 ) {
-  if (tile.discoveryState === 'Unknown' || tile.discoveryState === 'Rumored')
-    return null;
+  if (tile.discoveryState === 'Unknown') return null;
   const key = tile.terrainKey === 'mountain' ? 'mountains' : tile.terrainKey;
   return key && key in terrainSymbols
     ? terrainSymbols[key as keyof typeof terrainSymbols]
@@ -60,15 +54,14 @@ export function tileAppearance(
   mode: MapMode,
   countries: CountrySummary[],
 ) {
-  const knownState =
-    tile.discoveryState === 'Observed' || tile.discoveryState === 'Outdated';
+  const knownState = tile.discoveryState === 'Observed' || !!tile.dynamicKnown;
   if (mode === 'knowledge')
     return {
       color: discoveryStyles[tile.discoveryState].color,
       group: null,
       occupation: null,
     };
-  if (tile.discoveryState === 'Unknown' || tile.discoveryState === 'Rumored')
+  if (tile.discoveryState === 'Unknown')
     return { color: '#cbd2d4', group: null, occupation: null };
   if (mode === 'terrain')
     return {
@@ -76,19 +69,10 @@ export function tileAppearance(
       group: null,
       occupation: null,
     };
-  // Legacy observations contain an owner name but no ID/color. Resolve that
-  // recorded name against public country metadata, never the tile's live owner.
-  const owner = countries.find((country) =>
-    tile.legalOwnerCountryId
-      ? country.id === tile.legalOwnerCountryId
-      : country.name === tile.legalOwnerCountryName,
+  const owner = countries.find(
+    (country) => country.id === tile.legalOwnerCountryId,
   );
-  const group = knownState
-    ? (tile.legalOwnerCountryId ??
-      owner?.id ??
-      tile.legalOwnerCountryName ??
-      null)
-    : null;
+  const group = knownState ? (tile.legalOwnerCountryId ?? null) : null;
   const color = knownState ? (tile.legalOwnerColor ?? owner?.mapColor) : null;
   const controller = countries.find(
     (country) => country.id === tile.controllerCountryId,

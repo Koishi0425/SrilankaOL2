@@ -32,11 +32,13 @@ export function discoveryFor(
 ): DiscoveryState {
   if (view.access === 'Truth') return 'Observed';
   if (view.access === 'Public') return 'Mapped';
-  return recorded ?? 'Unknown';
+  return recorded === 'Observed' || recorded === 'Mapped'
+    ? recorded
+    : 'Unknown';
 }
 
 export function hasStableGeography(state: DiscoveryState): boolean {
-  return state === 'Mapped' || state === 'Observed' || state === 'Outdated';
+  return state === 'Mapped' || state === 'Observed';
 }
 
 export function hasCurrentState(state: DiscoveryState): boolean {
@@ -49,12 +51,11 @@ export function knowsAdministration(
 ): boolean {
   return (
     hasStableGeography(state) &&
-    (snapshot?.administrationKnown ??
-      (state === 'Observed' || state === 'Outdated'))
+    (snapshot?.administrationKnown ?? state === 'Observed')
   );
 }
 
-export const knownAdministrationSql = `COALESCE((k.snapshot->>'administrationKnown')::boolean,k.discovery_state IN ('Observed','Outdated'))`;
+export const knownAdministrationSql = `COALESCE((k.snapshot->>'administrationKnown')::boolean,k.discovery_state='Observed')`;
 
 export function projectArmy(
   row: PerceivedArmyRow,
@@ -104,11 +105,15 @@ export function hideUnknownTile(
   state: DiscoveryState,
 ): MapTileSummary {
   const stable = hasStableGeography(state);
-  const terrain = stable || state === 'Discovered';
-  const current = hasCurrentState(state) || state === 'Outdated';
+  const terrain = stable;
+  const current = hasCurrentState(state) || (stable && !!tile.dynamicKnown);
   return {
     ...tile,
     discoveryState: state,
+    knowledgeNote: state === 'Unknown' ? '' : tile.knowledgeNote,
+    observedAt: state === 'Unknown' ? null : tile.observedAt,
+    tags: current ? (tile.tags ?? []) : [],
+    dynamicKnown: current,
     terrainKey: terrain ? tile.terrainKey : null,
     terrainName: terrain ? tile.terrainName : null,
     terrainColor: terrain ? tile.terrainColor : null,

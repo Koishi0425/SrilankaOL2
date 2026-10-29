@@ -66,9 +66,9 @@ export function StateChangeEditor({
   const [loading, setLoading] = useState(false);
   const [reload, setReload] = useState(0);
   const [error, setError] = useState('');
-  const [kind, setKind] = useState<SettlementStateChange['kind']>(
-    provinceTargets.length ? 'Province' : 'ArmyMove',
-  );
+  const [kind, setKind] = useState<
+    Exclude<SettlementStateChange['kind'], 'TileTag'>
+  >(provinceTargets.length ? 'Province' : 'ArmyMove');
   const [armyId, setArmyId] = useState('');
   const [strength, setStrength] = useState('');
   const [minQ, setMinQ] = useState('');
@@ -95,7 +95,9 @@ export function StateChangeEditor({
   const province = options?.provinces?.find((p) => p.id === provinceId);
   const revisionCallback = useRef(onRevision);
   revisionCallback.current = onRevision;
-  const scoped = changes.filter((change) => change.actionId === actionId);
+  const scoped = changes.filter(
+    (change) => change.actionId === actionId && change.kind !== 'TileTag',
+  );
 
   useEffect(() => {
     if (!open || !active) return;

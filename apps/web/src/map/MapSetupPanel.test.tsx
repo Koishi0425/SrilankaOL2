@@ -17,7 +17,9 @@ import {
 import { MapSetupPanel } from './MapSetupPanel.js';
 vi.mock('../api.js', () => ({
   batchMapTiles: vi.fn(),
+  changeTileTags: vi.fn(),
   createMap: vi.fn(),
+  generateMapTerrain: vi.fn(),
   fetchMapSetup: vi.fn(),
   fetchMapReveal: vi.fn(),
   initializeMapKnowledge: vi.fn(),
@@ -126,7 +128,7 @@ describe('map editing and reveal workflow', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '发布所选信息' }));
     expect(
-      screen.getByText('向北国立即发布 1 个地块的已测绘信息。'),
+      screen.getByText('向北国立即发布 1 个地块的地理信息。'),
     ).toBeInTheDocument();
     expect(revealMapKnowledge).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('接收国家'), {

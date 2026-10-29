@@ -229,7 +229,7 @@ export class ActionService {
           SELECT 1 FROM country_tile_knowledge ctk
           WHERE ctk.game_id = $1 AND ctk.country_id = $3
             AND ctk.tile_id = object.tile_id
-            AND ctk.discovery_state IN ('Mapped', 'Observed', 'Outdated')
+            AND ctk.discovery_state IN ('Mapped', 'Observed')
         )`;
         values.push(countryId);
       } else if (ref.objectType === 'Character') {
@@ -239,9 +239,9 @@ export class ActionService {
         condition += ` AND EXISTS (
           SELECT 1 FROM country_tile_knowledge ctk
           WHERE ctk.game_id = $1 AND ctk.country_id = $3
-            AND ctk.discovery_state IN ('Mapped', 'Observed', 'Outdated')
+            AND ctk.discovery_state IN ('Mapped', 'Observed')
             AND ctk.snapshot->>'provinceName' = object.name
-            AND COALESCE((ctk.snapshot->>'administrationKnown')::boolean,ctk.discovery_state IN ('Observed','Outdated'))
+            AND COALESCE((ctk.snapshot->>'administrationKnown')::boolean,ctk.discovery_state IN ('Observed','Mapped'))
         )`;
         values.push(countryId);
       } else if (ref.objectType === 'Region') {
@@ -249,8 +249,8 @@ export class ActionService {
           SELECT 1 FROM hex_tiles t
           JOIN country_tile_knowledge ctk ON ctk.tile_id = t.id AND ctk.game_id = t.game_id
           WHERE t.game_id = $1 AND t.region_id = object.id AND ctk.country_id = $3
-            AND ctk.discovery_state IN ('Mapped', 'Observed', 'Outdated')
-            AND COALESCE((ctk.snapshot->>'administrationKnown')::boolean,ctk.discovery_state IN ('Observed','Outdated'))
+            AND ctk.discovery_state IN ('Mapped', 'Observed')
+            AND COALESCE((ctk.snapshot->>'administrationKnown')::boolean,ctk.discovery_state IN ('Observed','Mapped'))
         )`;
         values.push(countryId);
       }

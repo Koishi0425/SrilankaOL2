@@ -5,6 +5,9 @@ import type {
   MapHistoryEntry,
   MapKnowledgeInput,
   MapSetupData,
+  CreateMapInput,
+  MapGenerationOptions,
+  TileTagChange,
 } from '@srilanka/contracts';
 import type { DatabasePool } from '@srilanka/database';
 
@@ -24,6 +27,9 @@ import {
   requireMapHost,
   requireInstantCorrection,
 } from './map-mutations.js';
+
+import { tagBaseline, applyTileTag } from './tile-tags.js';
+import { applyGeneration, generationBlocked } from './map-generation.js';
 
 export class MapSetupService {
   constructor(private readonly database: DatabasePool) {}
@@ -66,6 +72,10 @@ export class MapSetupService {
     ]);
     const map = maps.rows[0];
     return {
+      generationBlockedReason:
+        map && (await generationBlocked(this.database, gameId))
+          ? '已有国家归属、地区、城市、军队、道路或已知情报，请使用笔刷与批量工具调整。'
+          : undefined,
       map: map
         ? {
             id: map.id,
@@ -98,15 +108,14 @@ export class MapSetupService {
     };
   }
 
-  async create(
-    gameId: string,
-    userId: string,
-    input: { name: string; width: number; height: number },
-  ) {
+  async create(gameId: string, userId: string, input: CreateMapInput) {
     await mapTransaction(this.database, async (db) => {
       await requireMapHost(db, gameId, userId);
-      const quarter = await db.query<{ state: string }>(
-        'SELECT state FROM quarters WHERE game_id = $1 AND is_current FOR UPDATE',
+      const quarter = await db.query<{
+        state: string;
+        sequence_number: number;
+      }>(
+        'SELECT state,sequence_number FROM quarters WHERE game_id = $1 AND is_current FOR UPDATE',
         [gameId],
       );
       if (quarter.rows[0]?.state !== 'Preparing')
@@ -115,8 +124,11 @@ export class MapSetupService {
           'MAP_SETUP_LOCKED',
           '请在回合准备阶段创建地图。',
         );
-      const game = await db.query<{ current_world_version: string }>(
-        'SELECT current_world_version FROM games WHERE id = $1 FOR UPDATE',
+      const game = await db.query<{
+        current_world_version: string;
+        status: string;
+      }>(
+        'SELECT current_world_version,status FROM games WHERE id = $1 FOR UPDATE',
         [gameId],
       );
       if (
@@ -130,6 +142,16 @@ export class MapSetupService {
           409,
           'MAP_ALREADY_EXISTS',
           '地图已存在，请直接编辑现有地块。',
+        );
+      if (
+        input.generation &&
+        (quarter.rows[0]?.sequence_number !== 1 ||
+          game.rows[0]?.status !== 'Preparing')
+      )
+        throw new ApiFault(
+          409,
+          'MAP_GENERATION_LOCKED',
+          '仅开局准备阶段可自动生成地图。',
         );
       const mapId = randomUUID();
       await db.query(
@@ -173,6 +195,14 @@ export class MapSetupService {
         JOIN terrain_types tt ON tt.game_id = $1 AND tt.key = 'plains'`,
         [gameId, mapId, input.width, input.height],
       );
+      if (input.generation)
+        await applyGeneration(
+          db,
+          gameId,
+          input.width,
+          input.height,
+          input.generation,
+        );
       await recordMapChange(db, {
         gameId,
         userId,
@@ -180,8 +210,73 @@ export class MapSetupService {
         truth: true,
         worldVersion: Number(game.rows[0]!.current_world_version),
         tileIds: [],
-        note: input.name,
-        details: input,
+        note: input.generation
+          ? `${input.name} · 自动地形 · 种子 ${input.generation.seed}`
+          : input.name,
+        details: {
+          ...input,
+          ...(input.generation ? { generatorVersion: 1 } : {}),
+        },
+      });
+    });
+    return this.get(gameId, userId);
+  }
+
+  async generate(
+    gameId: string,
+    userId: string,
+    input: MapGenerationOptions & { expectedRevision: number },
+  ) {
+    await mapTransaction(this.database, async (db) => {
+      await requireMapHost(db, gameId, userId);
+      const locked = await lockMap(db, gameId, input.expectedRevision);
+      if (
+        locked.gameStatus !== 'Preparing' ||
+        locked.quarter.state !== 'Preparing' ||
+        locked.quarter.sequence_number !== 1
+      )
+        throw new ApiFault(
+          409,
+          'MAP_GENERATION_LOCKED',
+          '仅开局准备阶段可重新生成地图。',
+        );
+      if (await generationBlocked(db, gameId))
+        throw new ApiFault(
+          409,
+          'MAP_GENERATION_HAS_CONTENT',
+          '已有国家归属、地区、城市、军队、道路或已知情报，不能重新生成，请使用批量工具调整。',
+        );
+      const maps = await db.query<{ width: number; height: number }>(
+        'SELECT width,height FROM world_maps WHERE game_id=$1',
+        [gameId],
+      );
+      const ids = await db.query<{ id: string }>(
+        'SELECT id FROM hex_tiles WHERE game_id=$1 ORDER BY r,q',
+        [gameId],
+      );
+      const tileIds = ids.rows.map((t) => t.id);
+      const before = await captureTiles(db, gameId, tileIds);
+      await applyGeneration(
+        db,
+        gameId,
+        maps.rows[0]!.width,
+        maps.rows[0]!.height,
+        input,
+      );
+      await recordMapChange(db, {
+        gameId,
+        userId,
+        kind: 'GenerateMap',
+        truth: true,
+        worldVersion: locked.worldVersion,
+        tileIds,
+        note: `自动生成地形 · 种子 ${input.seed}`,
+        details: {
+          generatorVersion: 1,
+          options: input,
+          before,
+          after: await captureTiles(db, gameId, tileIds),
+        },
       });
     });
     return this.get(gameId, userId);
@@ -302,6 +397,36 @@ export class MapSetupService {
           before,
           after: await captureTiles(db, gameId, input.tileIds),
         },
+      });
+    });
+    return this.get(gameId, userId);
+  }
+
+  async tags(
+    gameId: string,
+    userId: string,
+    input: TileTagChange & {
+      expectedRevision: number;
+      correctionReason?: string;
+    },
+  ) {
+    await mapTransaction(this.database, async (db) => {
+      await requireMapHost(db, gameId, userId);
+      const map = await lockMap(db, gameId, input.expectedRevision);
+      requireInstantCorrection(map, input);
+      const before = await tagBaseline(db, gameId, input);
+      await applyTileTag(db, gameId, map.quarter.sequence_number, input);
+      await recordMapChange(db, {
+        gameId,
+        userId,
+        kind: 'TileTags',
+        truth: true,
+        worldVersion: map.worldVersion,
+        tileIds: input.tileIds,
+        note:
+          input.correctionReason ??
+          `${input.operation === 'Set' ? '设置' : '移除'} ${input.tag.name}`,
+        details: { before, change: input },
       });
     });
     return this.get(gameId, userId);

@@ -55,6 +55,7 @@ interface TileRow {
   discovery_state: MapTileSummary['discoveryState'] | null;
   knowledge_confidence: number | null;
   observed_world_version: string | null;
+  tags: NonNullable<MapTileSummary['tags']>;
   snapshot: (Partial<TileDetails> & { administrationKnown?: boolean }) | null;
   public_note: string;
   observed_at: Date | null;
@@ -405,7 +406,7 @@ export class WorldService {
     }
     const map = await this.getMap(input.gameId, input.userId, db);
     const tilesResult = await db.query<TileRow>(
-      `SELECT t.id, t.q, t.r, tt.key AS terrain_key, tt.name AS terrain_name,
+      `SELECT t.id, t.q, t.r, map_tile_tags(t.id) AS tags, tt.key AS terrain_key, tt.name AS terrain_name,
                 tt.color AS terrain_color, t.region_id, r.name AS region_name,
                 t.controller_country_id, c.name AS controller_country_name,
                 c.map_color AS controller_color, t.legal_owner_country_id,
@@ -487,6 +488,8 @@ export class WorldService {
         q: row.q,
         r: row.r,
         discoveryState,
+        tags: view.access === 'Truth' ? row.tags : [],
+        dynamicKnown: view.access === 'Truth',
         confidence: view.access === 'Truth' ? 100 : row.knowledge_confidence,
         observedWorldVersion:
           row.observed_world_version === null
@@ -512,6 +515,8 @@ export class WorldService {
         view.access === 'Player'
           ? {
               ...truth,
+              tags: row.snapshot?.tags ?? [],
+              dynamicKnown: !!row.snapshot?.dynamicKnown,
               terrainKey: row.snapshot?.terrainKey ?? null,
               terrainName: row.snapshot?.terrainName ?? null,
               terrainColor: row.snapshot?.terrainColor ?? null,
@@ -617,7 +622,7 @@ export class WorldService {
       const rows =
         view.access === 'Player'
           ? await db.query<{ id: string; q: number; r: number }>(
-              `SELECT t.id,t.q,t.r FROM provinces p JOIN country_tile_knowledge k ON k.game_id=p.game_id AND k.country_id=$3 AND k.discovery_state IN ('Mapped','Observed','Outdated') AND ${knownAdministrationSql} AND k.snapshot->>'provinceName'=p.name JOIN hex_tiles t ON t.game_id=k.game_id AND t.id=k.tile_id WHERE p.game_id=$1 AND p.id=$2 ORDER BY t.r,t.q`,
+              `SELECT t.id,t.q,t.r FROM provinces p JOIN country_tile_knowledge k ON k.game_id=p.game_id AND k.country_id=$3 AND k.discovery_state IN ('Mapped','Observed') AND ${knownAdministrationSql} AND k.snapshot->>'provinceName'=p.name JOIN hex_tiles t ON t.game_id=k.game_id AND t.id=k.tile_id WHERE p.game_id=$1 AND p.id=$2 ORDER BY t.r,t.q`,
               [gameId, objectId, view.countryId],
             )
           : await db.query<{ id: string; q: number; r: number }>(
@@ -684,10 +689,8 @@ export class WorldService {
         [gameId, view.countryId, tileId],
       );
       const snapshot = knowledge.rows[0]?.snapshot;
-      const geography = ['Mapped', 'Observed', 'Outdated'].includes(
-        tile.discoveryState,
-      );
-      const current = ['Observed', 'Outdated'].includes(tile.discoveryState);
+      const geography = ['Mapped', 'Observed'].includes(tile.discoveryState);
+      const current = tile.discoveryState === 'Observed' || !!tile.dynamicKnown;
       return {
         ...tile,
         provinceName: knowsAdministration(tile.discoveryState, snapshot)
@@ -724,8 +727,7 @@ export class WorldService {
     const hasGeography =
       view.access === 'Truth' ||
       tile.discoveryState === 'Mapped' ||
-      tile.discoveryState === 'Observed' ||
-      tile.discoveryState === 'Outdated';
+      tile.discoveryState === 'Observed';
     const hasCurrentState =
       view.access === 'Truth' || tile.discoveryState === 'Observed';
     return {
@@ -795,18 +797,18 @@ export class WorldService {
         SELECT (city->>'id')::uuid AS id, 'City'::text AS type, city->>'name' AS name, k.tile_id AS "tileId", t.q, t.r
         FROM country_tile_knowledge k JOIN hex_tiles t ON t.id=k.tile_id
         CROSS JOIN LATERAL jsonb_array_elements(COALESCE(k.snapshot->'cities','[]'::jsonb)) city
-        WHERE k.game_id=$1 AND k.country_id=$3 AND k.discovery_state IN ('Discovered','Mapped','Observed','Outdated')
+        WHERE k.game_id=$1 AND k.country_id=$3 AND k.discovery_state IN ('Mapped','Mapped','Observed')
         UNION ALL
         SELECT a.id,'Army',a.name,a.tile_id,t.q,t.r FROM armies a JOIN hex_tiles t ON t.id=a.tile_id WHERE a.game_id=$1 AND a.country_id=$3
         UNION ALL
         SELECT i.army_id,'Army',i.perceived_name,i.observed_tile_id,t.q,t.r FROM country_army_intelligence i
         JOIN armies a ON a.id=i.army_id JOIN hex_tiles t ON t.id=i.observed_tile_id
         JOIN country_tile_knowledge k ON k.game_id=i.game_id AND k.country_id=i.country_id AND k.tile_id=i.observed_tile_id
-        WHERE i.game_id=$1 AND i.country_id=$3 AND a.country_id<>$3 AND k.discovery_state IN ('Discovered','Mapped','Observed','Outdated')
+        WHERE i.game_id=$1 AND i.country_id=$3 AND a.country_id<>$3 AND k.discovery_state IN ('Mapped','Mapped','Observed')
         UNION ALL
         SELECT DISTINCT ON (k.snapshot->>'regionId') (k.snapshot->>'regionId')::uuid,'Region',k.snapshot->>'regionName',k.tile_id,t.q,t.r
         FROM country_tile_knowledge k JOIN hex_tiles t ON t.id=k.tile_id WHERE k.game_id=$1 AND k.country_id=$3
-          AND k.snapshot->>'regionId' IS NOT NULL AND k.discovery_state IN ('Mapped','Observed','Outdated') AND ${knownAdministrationSql}
+          AND k.snapshot->>'regionId' IS NOT NULL AND k.discovery_state IN ('Mapped','Observed') AND ${knownAdministrationSql}
       ) objects WHERE LOWER(name) LIKE LOWER($2) ORDER BY name LIMIT 20`,
         [gameId, `%${query}%`, view.countryId],
       );
@@ -818,7 +820,7 @@ export class WorldService {
          FROM cities ci JOIN hex_tiles t ON t.id = ci.tile_id
          LEFT JOIN country_tile_knowledge ctk ON ctk.game_id = t.game_id
            AND ctk.tile_id = t.id AND ctk.country_id = $3
-         WHERE ci.game_id = $1 AND ($4 OR $5 OR ctk.discovery_state IN ('Mapped', 'Observed', 'Outdated'))
+         WHERE ci.game_id = $1 AND ($4 OR $5 OR ctk.discovery_state IN ('Mapped', 'Observed'))
          UNION ALL
          SELECT a.id, 'Army',
                 CASE WHEN $4 OR a.country_id = $3 THEN a.name ELSE cai.perceived_name END,
@@ -835,7 +837,7 @@ export class WorldService {
            SELECT 1 FROM hex_tiles t
            JOIN country_tile_knowledge ctk ON ctk.game_id = t.game_id
              AND ctk.tile_id = t.id AND ctk.country_id = $3
-           WHERE t.region_id = r.id AND ctk.discovery_state IN ('Mapped', 'Observed', 'Outdated')
+           WHERE t.region_id = r.id AND ctk.discovery_state IN ('Mapped', 'Observed')
          ))
        ) objects WHERE LOWER(name) LIKE LOWER($2) ORDER BY name LIMIT 20`,
       [

@@ -43,6 +43,7 @@ import type { DatabaseClient, DatabasePool } from '@srilanka/database';
 import { ApiFault } from '../../errors.js';
 import { readGameRules } from '../games/game-rules.js';
 import { listRevealPlans, publishMapReveals } from '../world/map-discovery.js';
+import { recordMapChange } from '../world/map-mutations.js';
 import { refreshCountryVision } from '../world/map-vision.js';
 import {
   prepareStateChanges,
@@ -1129,6 +1130,26 @@ export class SettlementService {
         'UPDATE games SET current_year = $2, current_season = $3 WHERE id = $1',
         [gameId, calendar.gameYear, calendar.season],
       );
+      const boundaries = await client.query<{ tile_id: string }>(
+        'SELECT DISTINCT tile_id FROM tile_tags WHERE game_id=$1 AND (starts_sequence=$2 OR ends_sequence=$2-1)',
+        [gameId, quarter.sequence_number + 1],
+      );
+      if (boundaries.rows.length) {
+        await recordMapChange(client, {
+          gameId,
+          userId,
+          kind: 'TileTagPeriod',
+          truth: true,
+          worldVersion: Number(game.current_world_version),
+          tileIds: boundaries.rows.map((t) => t.tile_id),
+          note: '地块状态进入新回合',
+          details: { sequence: quarter.sequence_number + 1 },
+        });
+        await client.query(
+          'UPDATE quarters SET base_world_version=(SELECT current_world_version FROM games WHERE id=$1) WHERE game_id=$1 AND is_current',
+          [gameId],
+        );
+      } else await refreshCountryVision(client, gameId);
     });
     const current = await this.database.query<QuarterRow>(
       `SELECT q.*, g.current_world_version FROM quarters q JOIN games g ON g.id = q.game_id WHERE q.game_id = $1 AND q.is_current`,

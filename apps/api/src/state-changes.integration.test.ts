@@ -312,7 +312,7 @@ describe('settlement world changes', () => {
       )
     ).rows[0]!;
     expect(unaffected.snapshot.controllerCountryId).toBe(otherCountryId);
-    expect(unaffected.discovery_state).toBe('Outdated');
+    expect(unaffected.discovery_state).toBe('Mapped');
   });
 
   it('reports enemy movement and casualties from the same settlement while retaining older saved geography', async () => {
@@ -393,7 +393,7 @@ describe('settlement world changes', () => {
     expect((await save([changes()[1]!])).statusCode).toBe(200);
     expect((await publish()).statusCode).toBe(200);
     const report = await world.getTile(gameId, playerId, tiles[1]!);
-    expect(report.discoveryState).toBe('Outdated');
+    expect(report.discoveryState).toBe('Mapped');
     expect(report.cities.map((city) => city.name)).toEqual(['边城']);
     expect(report.knowledgeNote).toBe('早前情报');
   });
@@ -444,7 +444,7 @@ describe('settlement world changes', () => {
       strength: { kind: 'Exact', value: 720 },
     });
     const otherTile = await world.getTile(gameId, otherId, tiles[0]!);
-    expect(otherTile.discoveryState).toBe('Outdated');
+    expect(otherTile.discoveryState).toBe('Mapped');
     expect(otherTile.armies[0]).toMatchObject({
       id: armyId,
       outdated: true,

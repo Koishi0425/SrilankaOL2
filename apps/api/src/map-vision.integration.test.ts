@@ -184,7 +184,7 @@ it('retains old geography after a remote homeland enclave is occupied, and refre
     name: '敌占后新城',
   });
   expect(await details(11, 3)).toMatchObject({
-    discoveryState: 'Outdated',
+    discoveryState: 'Mapped',
     controllerCountryId: country,
   });
   expect((await details(11, 3)).cities.map((c) => c.name)).toEqual([
@@ -213,7 +213,7 @@ it('retains old geography after a remote homeland enclave is occupied, and refre
     armyId: army.id,
     tileId: at(2, 3).id,
   });
-  expect((await details(11, 3)).discoveryState).toBe('Outdated');
+  expect((await details(11, 3)).discoveryState).toBe('Mapped');
 });
 
 it('shows only estimates of nearby enemies, keeps old reports after scouts withdraw, and clears sightings when an observed position is empty', async () => {

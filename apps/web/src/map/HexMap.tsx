@@ -1,3 +1,4 @@
+import { TileTags } from './TileTags.js';
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
@@ -52,11 +53,8 @@ const HEX_SIZE = 27;
 
 const discoveryStateNames: Record<MapTileSummary['discoveryState'], string> = {
   Unknown: '未知',
-  Rumored: '传闻',
-  Discovered: '已发现',
-  Mapped: '已测绘',
-  Observed: '当前可见',
-  Outdated: '旧情报',
+  Mapped: '已知',
+  Observed: '可见',
 };
 
 function drawHex(
@@ -194,6 +192,10 @@ export function HexMap({
     name: string;
   } | null>(null);
   const [editing, setEditing] = useState(false);
+  const [selectionTool, setSelectionTool] = useState<'pan' | 'add' | 'erase'>(
+    'pan',
+  );
+  const [brushSize, setBrushSize] = useState(1);
   const [mobileMapPicking, setMobileMapPicking] = useState(false);
   const [setupOpened, setSetupOpened] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -699,6 +701,42 @@ export function HexMap({
     showDetails,
   ]);
 
+  function paintSelection(
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    canvas: HTMLCanvasElement,
+  ) {
+    const rect = canvas.getBoundingClientRect();
+    const steps = Math.max(
+      1,
+      Math.ceil(
+        Math.hypot(to.x - from.x, to.y - from.y) /
+          Math.max(2, (HEX_SIZE * view.scale) / 2),
+      ),
+    );
+    const hits = new Set<string>();
+    for (let step = 0; step <= steps; step++) {
+      const point = screenToAxial(
+        from.x + ((to.x - from.x) * step) / steps - rect.left,
+        from.y + ((to.y - from.y) * step) / steps - rect.top,
+        view,
+        HEX_SIZE,
+      );
+      const a = point.q - (point.r - (point.r & 1)) / 2;
+      for (const tile of viewport?.tiles ?? []) {
+        const dq = tile.q - (tile.r - (tile.r & 1)) / 2 - a,
+          dr = tile.r - point.r;
+        if (Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr)) < brushSize)
+          hits.add(tile.id);
+      }
+    }
+    setSelectedIds((current) =>
+      selectionTool === 'erase'
+        ? current.filter((id) => !hits.has(id))
+        : [...new Set([...current, ...hits])].slice(0, 2500),
+    );
+  }
+
   async function selectTile(tile: MapTileSummary | undefined) {
     if (!tile || mutationPending.current) return;
     if (showingEditor) {
@@ -1084,6 +1122,39 @@ export function HexMap({
           </button>
         </div>
       )}
+      {showingEditor && (
+        <div className="map-paint-tools" role="group" aria-label="地图选区工具">
+          <label>
+            操作
+            <select
+              aria-label="选区操作"
+              value={selectionTool}
+              onChange={(e) =>
+                setSelectionTool(e.target.value as typeof selectionTool)
+              }
+            >
+              <option value="pan">移动地图 / 点选</option>
+              <option value="add">笔刷添加选区</option>
+              <option value="erase">笔刷擦除选区</option>
+            </select>
+          </label>
+          {selectionTool !== 'pan' && (
+            <label>
+              笔刷大小
+              <select
+                value={brushSize}
+                onChange={(e) => setBrushSize(Number(e.target.value))}
+              >
+                <option value={1}>单格</option>
+                <option value={2}>7 格</option>
+                <option value={3}>19 格</option>
+                <option value={4}>37 格</option>
+              </select>
+            </label>
+          )}
+          <span>拖动涂选后应用设置，最多 2500 格；双指可缩放。</span>
+        </div>
+      )}
       <div
         data-mobile-picking={showingEditor && mobileMapPicking}
         data-moving-army={!!movingArmy}
@@ -1255,6 +1326,17 @@ export function HexMap({
                 ) < 5
               )
                 return;
+              if (showingEditor && selectionTool !== 'pan') {
+                drag.moved = true;
+                paintSelection(
+                  { x: drag.x, y: drag.y },
+                  { x: event.clientX, y: event.clientY },
+                  event.currentTarget,
+                );
+                drag.x = event.clientX;
+                drag.y = event.clientY;
+                return;
+              }
               const dx = event.clientX - drag.x;
               const dy = event.clientY - drag.y;
               drag.moved = true;
@@ -1291,6 +1373,14 @@ export function HexMap({
                 ) >= 5
               )
                 return;
+              if (showingEditor && selectionTool !== 'pan') {
+                paintSelection(
+                  { x: event.clientX, y: event.clientY },
+                  { x: event.clientX, y: event.clientY },
+                  event.currentTarget,
+                );
+                return;
+              }
               const rect = event.currentTarget.getBoundingClientRect();
               const coordinate = screenToAxial(
                 event.clientX - rect.left,
@@ -1407,10 +1497,22 @@ export function HexMap({
                   <dd>{selected.movementCost ?? '未知'}</dd>
                   <dt>地图认知</dt>
                   <dd>{discoveryStateNames[selected.discoveryState]}</dd>
+                  {selected.observedAt && (
+                    <>
+                      <dt>
+                        {selected.discoveryState === 'Observed'
+                          ? '观察更新'
+                          : '上次观察'}
+                      </dt>
+                      <dd>
+                        {new Date(selected.observedAt).toLocaleString('zh-CN')}
+                      </dd>
+                    </>
+                  )}
                   <dt>城市</dt>
                   <dd>
                     {selected.cities.map((city) => city.name).join('、') ||
-                      (['Unknown', 'Rumored'].includes(selected.discoveryState)
+                      (['Unknown'].includes(selected.discoveryState)
                         ? '未知'
                         : '无')}
                   </dd>
@@ -1445,6 +1547,7 @@ export function HexMap({
                 {selected.knowledgeNote && (
                   <p className="rules-text">{selected.knowledgeNote}</p>
                 )}
+                <TileTags tile={selected} />
                 <TileContextPanel
                   key={`${selected.id}:${previewMemberId ?? ''}`}
                   gameId={game.id}

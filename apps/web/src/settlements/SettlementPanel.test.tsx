@@ -1344,7 +1344,7 @@ describe('settlement writing and publication', () => {
     );
     fireEvent.click(await screen.findByRole('button', { name: /北方探索/ }));
     expect(
-      screen.getByText('将揭示 2 个地块（已测绘）：发现海岸'),
+      screen.getByText('将揭示 2 个地块（地理信息）：发现海岸'),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '设置探索结果' }));
     expect(open).toHaveBeenCalledWith({

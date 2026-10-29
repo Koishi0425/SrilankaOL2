@@ -172,11 +172,8 @@ export class AssistantService {
       }
       const knowledgeNames = {
         Unknown: '未知',
-        Rumored: '传闻',
-        Discovered: '已发现',
-        Mapped: '已测绘',
+        Mapped: '已知',
         Observed: '正在观察',
-        Outdated: '过时信息',
       };
       for (const reveal of data.mapReveals ?? [])
         add(

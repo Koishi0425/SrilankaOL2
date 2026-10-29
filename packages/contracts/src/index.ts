@@ -412,6 +412,7 @@ export interface MapMetadata {
 }
 
 export interface MapSetupData {
+  generationBlockedReason?: string;
   map: MapMetadata | null;
   terrains: Array<{
     id: string;
@@ -473,8 +474,7 @@ export interface MapCityMarker {
   status: string;
 }
 
-export type DiscoveryState =
-  'Unknown' | 'Rumored' | 'Discovered' | 'Mapped' | 'Observed' | 'Outdated';
+export type DiscoveryState = 'Unknown' | 'Mapped' | 'Observed';
 
 export type ArmyStrengthKnowledge =
   | { kind: 'Exact'; value: number }
@@ -492,11 +492,64 @@ export interface MapArmyMarker {
   outdated: boolean;
 }
 
+export interface TileTagSpec {
+  name: string;
+  description: string;
+  taxPercent: number;
+  productionPercent: number;
+  blocksObservation: boolean;
+  duration: number | null;
+}
+export function validTileTag(tag: TileTagSpec) {
+  return (
+    !!tag.name.trim() &&
+    tag.name.trim().length <= 60 &&
+    tag.description.length <= 2000 &&
+    [tag.taxPercent, tag.productionPercent].every(
+      (n) => Number.isInteger(n) && n >= -100 && n <= 300,
+    ) &&
+    (tag.duration === null ||
+      (Number.isInteger(tag.duration) &&
+        tag.duration >= 1 &&
+        tag.duration <= 40))
+  );
+}
+export interface TileTag extends Omit<TileTagSpec, 'duration'> {
+  id: string;
+  startsSequence: number;
+  endsSequence: number | null;
+}
+export function tileTagWeight(
+  tags: Pick<TileTag, 'taxPercent' | 'productionPercent'>[],
+  kind: 'Tax' | 'Production',
+) {
+  return Math.max(
+    0,
+    Math.min(
+      40000,
+      10000 +
+        tags.reduce(
+          (sum, tag) =>
+            sum +
+            (kind === 'Tax' ? tag.taxPercent : tag.productionPercent) * 100,
+          0,
+        ),
+    ),
+  );
+}
+export interface TileTagChange {
+  tileIds: string[];
+  operation: 'Set' | 'Remove';
+  tag: TileTagSpec;
+}
+
 export interface MapTileSummary {
   id: string;
   q: number;
   r: number;
   discoveryState: DiscoveryState;
+  dynamicKnown?: boolean;
+  tags?: TileTag[];
   confidence: number | null;
   observedWorldVersion: number | null;
   terrainKey: string | null;
@@ -961,6 +1014,7 @@ export type SettlementStateChangeInput = {
   id: string;
   actionId: string | null;
 } & (
+  | ({ kind: 'TileTag' } & TileTagChange)
   | { kind: 'ArmyMove'; armyId: string; destinationTileId: string }
   | { kind: 'ArmyStrength'; armyId: string; strength: number }
   | {
@@ -1010,6 +1064,14 @@ export function toStateChangeInput(
 ): SettlementStateChangeInput {
   const base = { id: change.id, actionId: change.actionId };
   switch (change.kind) {
+    case 'TileTag':
+      return {
+        ...base,
+        kind: change.kind,
+        tileIds: [...change.tileIds],
+        operation: change.operation,
+        tag: { ...change.tag },
+      };
     case 'TradeInfluence':
       return {
         ...base,
@@ -1065,7 +1127,13 @@ export function toStateChangeInput(
 export interface SettlementStateOptions {
   mapRevision: number;
   countries: Array<{ id: string; name: string }>;
-  tiles: Array<{ id: string; q: number; r: number; passable: boolean }>;
+  tiles: Array<{
+    id: string;
+    q: number;
+    r: number;
+    passable: boolean;
+    provinceId?: string | null;
+  }>;
   provinces?: Array<{
     id: string;
     name: string;
@@ -1496,3 +1564,5 @@ export interface AssistantResult {
   }>;
   generatedAt: string;
 }
+
+export * from './map-generation.js';

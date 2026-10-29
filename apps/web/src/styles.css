@@ -575,6 +575,117 @@ legend {
 .map-fields select {
   width: 100%;
 }
+
+.map-generator {
+  display: grid;
+  gap: 12px;
+  padding-block: 12px;
+  min-width: 0;
+}
+.map-generator > .draft-fields {
+  display: grid;
+  gap: 12px;
+}
+.map-generator label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.map-generator .check-row {
+  display: flex;
+  align-items: center;
+}
+.map-generator :is(input, select) {
+  min-width: 0;
+  width: 100%;
+}
+.map-generator input[type='checkbox'] {
+  width: auto;
+}
+.map-generator-preview {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  background: #dbe8ed;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.map-generator-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 12px;
+  margin: 0;
+}
+.map-generator-counts span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.map-generator-counts i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.map-paint-tools {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #f3f6f1;
+}
+.map-paint-tools label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.map-paint-tools span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.tile-tag-fields {
+  border: 0;
+  margin: 0;
+  padding: 8px 0;
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+.tile-tag-fields label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.tile-tag-fields .check-row {
+  display: flex;
+  align-items: center;
+}
+.tile-tag-fields :is(input:not([type='checkbox']), textarea, select) {
+  width: 100%;
+  min-width: 0;
+}
+.tile-tags {
+  border-top: 1px solid var(--line);
+  padding-block: 12px;
+}
+.tile-tags article {
+  margin-block: 10px;
+  padding: 10px;
+  background: #f3f6ef;
+  border-radius: 8px;
+}
+.tile-tags article p {
+  margin: 6px 0;
+}
+.tile-tags small {
+  display: block;
+  margin-top: 6px;
+  line-height: 1.7;
+}
 .map-selection details {
   flex: 1 1 100%;
 }

@@ -1,3 +1,4 @@
+import { validTileTag } from '@srilanka/contracts';
 import { useEffect, useState } from 'react';
 import type {
   CountrySummary,
@@ -8,13 +9,16 @@ import type {
 } from '@srilanka/contracts';
 import {
   batchMapTiles,
-  createMap,
+  changeTileTags,
   fetchMapReveal,
   fetchMapSetup,
   initializeMapKnowledge,
   removeMapReveal,
   revealMapKnowledge,
 } from '../api.js';
+
+import { TileTagFields, emptyTileTag } from './TileTags.js';
+import { MapGenerator } from './MapGenerator.js';
 
 export interface MapRevealSeed {
   key: number;
@@ -24,12 +28,9 @@ export interface MapRevealSeed {
   tileIds: string[];
 }
 export const discoveryNames: Record<DiscoveryState, string> = {
-  Unknown: '未知',
-  Rumored: '传闻',
-  Discovered: '已发现',
-  Mapped: '已测绘',
-  Observed: '观察记录',
-  Outdated: '旧情报',
+  Unknown: '清除记录',
+  Mapped: '地理信息',
+  Observed: '侦察情报',
 };
 
 export function MapSetupPanel({
@@ -63,9 +64,7 @@ export function MapSetupPanel({
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [mode, setMode] = useState('tiles');
-  const [name, setName] = useState('剧本地图');
-  const [width, setWidth] = useState(24);
-  const [height, setHeight] = useState(16);
+  const [tag, setTag] = useState({ ...emptyTileTag });
   const [terrain, setTerrain] = useState('');
   const [control, setControl] = useState('keep');
   const [legal, setLegal] = useState('keep');
@@ -82,6 +81,7 @@ export function MapSetupPanel({
   const [source, setSource] = useState<MapRevealSeed>();
   const [hasPlan, setHasPlan] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [rect, setRect] = useState({ minQ: 0, maxQ: 3, minR: 0, maxR: 3 });
   useEffect(() => {
     if (seed) return;
@@ -139,6 +139,7 @@ export function MapSetupPanel({
   }, [game.id, seed, onSelection]);
   useEffect(() => {
     setConfirm(false);
+    setClearing(false);
   }, [
     selectedIds,
     countryId,
@@ -193,55 +194,50 @@ export function MapSetupPanel({
       {!setup ? (
         <p>加载中…</p>
       ) : !setup.map ? (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void perform(
-              () => createMap(game.id, { name: name.trim(), width, height }),
-              '地图已创建',
-            );
+        <MapGenerator
+          gameId={game.id}
+          onRefresh={(data) => {
+            setSetup(data);
+            if (data.map) onChanged(data.map);
           }}
-        >
-          <h4>创建地图</h4>
-          <div className="map-fields">
-            <label>
-              地图名称
-              <input
-                required
-                maxLength={120}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </label>
-            <label>
-              列数
-              <input
-                type="number"
-                min={1}
-                max={100}
-                required
-                value={width}
-                onChange={(event) => setWidth(Number(event.target.value))}
-              />
-            </label>
-            <label>
-              行数
-              <input
-                type="number"
-                min={1}
-                max={100}
-                required
-                value={height}
-                onChange={(event) => setHeight(Number(event.target.value))}
-              />
-            </label>
-          </div>
-          <button disabled={busy || game.currentQuarter.state !== 'Preparing'}>
-            创建空白地图
-          </button>
-        </form>
+          countries={countries}
+          map={null}
+          blockedReason={
+            !canInitialize || game.status !== 'Preparing'
+              ? '仅开局准备阶段可创建自动地图。'
+              : undefined
+          }
+          onSelection={onSelection}
+          onChanged={(data) => {
+            setSetup(data);
+            if (data.map) onChanged(data.map);
+            setMessage('地图已创建，可用笔刷与批量工具微调。');
+          }}
+        />
       ) : (
         <>
+          {canInitialize && game.status === 'Preparing' && !seed && (
+            <details>
+              <summary>自动生成地形</summary>
+              <MapGenerator
+                onRefresh={(data) => {
+                  setSetup(data);
+                  if (data.map) onChanged(data.map);
+                }}
+                key={setup.map.id}
+                gameId={game.id}
+                countries={countries}
+                map={setup.map}
+                blockedReason={setup.generationBlockedReason}
+                onSelection={onSelection}
+                onChanged={(data) => {
+                  setSetup(data);
+                  if (data.map) onChanged(data.map);
+                  setMessage('地形已生成');
+                }}
+              />
+            </details>
+          )}
           <div className="map-setup-tabs">
             <button
               disabled={busy}
@@ -257,6 +253,15 @@ export function MapSetupPanel({
             >
               揭示信息
             </button>
+            {!seed && (
+              <button
+                disabled={busy}
+                aria-pressed={mode === 'tags'}
+                onClick={() => setMode('tags')}
+              >
+                地块状态
+              </button>
+            )}
             {canInitialize && (
               <button
                 disabled={busy}
@@ -443,6 +448,65 @@ export function MapSetupPanel({
                   应用到所选地块
                 </button>
               </>
+            ) : mode === 'tags' ? (
+              <>
+                <TileTagFields value={tag} onChange={setTag} />
+                <p>
+                  立即设置从本回合起生效；普通回合变化请在结算的“地块状态”中发布。
+                </p>
+                <button
+                  disabled={
+                    !selectedIds.length ||
+                    !validTileTag(tag) ||
+                    ((game.status !== 'Preparing' ||
+                      game.currentQuarter.state !== 'Preparing') &&
+                      !correctionReason?.trim())
+                  }
+                  onClick={() =>
+                    void perform(
+                      () =>
+                        changeTileTags(game.id, {
+                          expectedRevision: revision,
+                          tileIds: selectedIds,
+                          operation: 'Set',
+                          tag,
+                          ...(correctionReason?.trim()
+                            ? { correctionReason: correctionReason.trim() }
+                            : {}),
+                        }),
+                      '地块状态已设置',
+                    )
+                  }
+                >
+                  设置所选地块状态
+                </button>
+                <button
+                  disabled={
+                    !selectedIds.length ||
+                    !validTileTag(tag) ||
+                    ((game.status !== 'Preparing' ||
+                      game.currentQuarter.state !== 'Preparing') &&
+                      !correctionReason?.trim())
+                  }
+                  onClick={() =>
+                    void perform(
+                      () =>
+                        changeTileTags(game.id, {
+                          expectedRevision: revision,
+                          tileIds: selectedIds,
+                          operation: 'Remove',
+                          tag,
+                          ...(correctionReason?.trim()
+                            ? { correctionReason: correctionReason.trim() }
+                            : {}),
+                        }),
+                      '同名地块状态已移除',
+                    )
+                  }
+                >
+                  移除所选地块的同名状态
+                </button>
+              </>
             ) : (
               <>
                 {source && mode === 'knowledge' && (
@@ -495,26 +559,37 @@ export function MapSetupPanel({
                     </label>
                   ) : (
                     <label>
-                      揭示程度
+                      揭示内容
                       <select
                         value={state}
                         onChange={(event) =>
                           setState(event.target.value as DiscoveryState)
                         }
                       >
-                        {Object.entries(discoveryNames).map(([key, value]) => (
-                          <option key={key} value={key}>
-                            {value}
-                          </option>
-                        ))}
+                        <option value="Mapped">地理信息</option>
+                        <option value="Observed">侦察情报</option>
                       </select>
                     </label>
                   )}
                 </div>
+                {mode === 'knowledge' && !source && (
+                  <details>
+                    <summary>高级操作</summary>
+                    <button
+                      disabled={!selectedIds.length || !countryId}
+                      onClick={() => {
+                        setClearing(true);
+                        setConfirm(true);
+                      }}
+                    >
+                      清除所选地块已知记录
+                    </button>
+                  </details>
+                )}
                 {mode === 'knowledge' && (
                   <>
                     <p>
-                      记录不会让远处持续可见；当前视野来自本国控制区与己方部队周围两格。
+                      揭示保存本次获知的信息，不赋予永久实时视野；标签随侦察情报更新。
                     </p>
                     <label>
                       给玩家的信息
@@ -566,9 +641,9 @@ export function MapSetupPanel({
                             expectedRevision: revision,
                             countryId,
                             tileIds: selectedIds,
-                            state,
+                            state: clearing ? 'Unknown' : state,
                             note,
-                            ...(reportArmy && state === 'Observed'
+                            ...(!clearing && reportArmy && state === 'Observed'
                               ? { armyErrorPercent: armyError }
                               : {}),
                             sourceActionId: source.actionId,
@@ -605,7 +680,10 @@ export function MapSetupPanel({
                       (mode === 'knowledge' && !selectedIds.length) ||
                       (mode === 'initial' && !canInitialize)
                     }
-                    onClick={() => setConfirm(true)}
+                    onClick={() => {
+                      setClearing(false);
+                      setConfirm(true);
+                    }}
                   >
                     {mode === 'initial' ? '设置初始范围' : '发布所选信息'}
                   </button>
@@ -618,7 +696,9 @@ export function MapSetupPanel({
               <p>
                 {mode === 'initial'
                   ? `将重新设置${country}的全图已知范围，覆盖现有情报。`
-                  : `向${country}立即发布 ${selectedIds.length} 个地块的${discoveryNames[state]}信息。`}
+                  : clearing
+                    ? `清除${country}对所选 ${selectedIds.length} 个地块的已知记录；实际视野内的信息仍会恢复。`
+                    : `向${country}立即发布 ${selectedIds.length} 个地块的${discoveryNames[state]}。`}
               </p>
               <button
                 disabled={busy}
@@ -635,9 +715,9 @@ export function MapSetupPanel({
                             expectedRevision: revision,
                             countryId,
                             tileIds: selectedIds,
-                            state,
+                            state: clearing ? 'Unknown' : state,
                             note,
-                            ...(reportArmy && state === 'Observed'
+                            ...(!clearing && reportArmy && state === 'Observed'
                               ? { armyErrorPercent: armyError }
                               : {}),
                           }),
@@ -647,7 +727,13 @@ export function MapSetupPanel({
               >
                 确认{mode === 'initial' ? '设置' : '发布'}
               </button>
-              <button disabled={busy} onClick={() => setConfirm(false)}>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  setConfirm(false);
+                  setClearing(false);
+                }}
+              >
                 取消
               </button>
             </div>
