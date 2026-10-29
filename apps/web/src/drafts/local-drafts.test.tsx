@@ -1,5 +1,9 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { DraftSession, priorPolicyDraftKey } from './local-drafts.js';
+import {
+  DraftSession,
+  priorPolicyDraftKey,
+  priorRoundPolicyDraftKeys,
+} from './local-drafts.js';
 const valid = (v: unknown): v is { text: string } =>
   !!v && typeof v === 'object' && 'text' in v && typeof v.text === 'string';
 const key = (user = 'u', game = 'g', quarter = 'q') =>
@@ -57,4 +61,29 @@ it('reports corrupt or unavailable storage without claiming it saved or overwrit
   expect(normal.write({ text: '重要文字' })).toBe(false);
   expect(normal.saved).toBeNull();
   expect(normal.error).toContain('暂存失败');
+});
+
+it('discovers previous round-policy keys only within the same account, game and author/country', () => {
+  const roundKey = (
+    user = 'u',
+    game = 'g',
+    quarter = 'q',
+    object = 'member:country',
+    kind = 'round-policy',
+  ) =>
+    `srilanka:draft:v1:${JSON.stringify([user, game, quarter, kind, object])}`;
+  const same = roundKey('u', 'g', 'old');
+  for (const key of [
+    same,
+    roundKey(),
+    roundKey('other', 'g', 'old'),
+    roundKey('u', 'other-game', 'old'),
+    roundKey('u', 'g', 'old', 'different:country'),
+    roundKey('u', 'g', 'old', 'member:other-country'),
+    roundKey('u', 'g', 'old', 'member:country', 'round-review'),
+    'srilanka:draft:v1:broken',
+  ])
+    localStorage.setItem(key, '{}');
+  expect(priorRoundPolicyDraftKeys(roundKey())).toEqual([same]);
+  expect(priorRoundPolicyDraftKeys(null)).toEqual([]);
 });

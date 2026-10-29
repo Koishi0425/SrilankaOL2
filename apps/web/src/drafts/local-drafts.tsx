@@ -36,6 +36,42 @@ export interface LocalDraft<T> {
   savedAt: string;
   value: T;
 }
+/** Only discover keys in the current account/game/author scope; reading needs server authorization. */
+export function priorRoundPolicyDraftKeys(key: string | null): string[] {
+  if (!key) return [];
+  const prefix = 'srilanka:draft:v1:';
+  if (!key.startsWith(prefix)) return [];
+  const scope = JSON.parse(key.slice(prefix.length)) as string[];
+  if (
+    !Array.isArray(scope) ||
+    scope.length !== 5 ||
+    scope.some((v) => typeof v !== 'string') ||
+    scope[3] !== 'round-policy'
+  )
+    return [];
+  const keys: string[] = [];
+  for (let index = 0; index < localStorage.length; index++) {
+    const candidate = localStorage.key(index);
+    if (!candidate?.startsWith(prefix)) continue;
+    try {
+      const other: unknown = JSON.parse(candidate.slice(prefix.length));
+      if (
+        Array.isArray(other) &&
+        other.length === 5 &&
+        other.every((v) => typeof v === 'string') &&
+        other[0] === scope[0] &&
+        other[1] === scope[1] &&
+        other[2] !== scope[2] &&
+        other[3] === 'round-policy' &&
+        other[4] === scope[4]
+      )
+        keys.push(candidate);
+    } catch {
+      /* An unrelated corrupt key must not hide valid drafts. */
+    }
+  }
+  return keys;
+}
 export function priorPolicyDraftKey(key: string | null) {
   if (!key) return key;
   try {

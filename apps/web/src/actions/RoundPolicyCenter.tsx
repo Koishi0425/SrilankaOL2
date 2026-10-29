@@ -26,48 +26,15 @@ import { ActionMapLinks } from '../map/ActionMapLinks.js';
 import { mergeActionRefs, statusNames } from './ActionCenter.js';
 import type { ActionCenter } from './ActionCenter.js';
 import { categories, categoryName } from './action-labels.js';
+import {
+  isLocalPolicy,
+  policyDraftPreview,
+  type RemovedPolicySection,
+} from './policy-draft-data.js';
+import { useReviewDrafts } from './review-drafts.js';
+import { PriorPolicyDrafts } from './PriorPolicyDrafts.js';
 
 type Props = ComponentProps<typeof ActionCenter>;
-type LocalPolicy = {
-  revision: string;
-  countryId: string;
-  sections: RoundPolicySectionInput[];
-};
-function isLocalPolicy(value: unknown): value is LocalPolicy {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as LocalPolicy;
-  return (
-    typeof v.revision === 'string' &&
-    typeof v.countryId === 'string' &&
-    Array.isArray(v.sections) &&
-    v.sections.every(
-      (s) =>
-        s &&
-        typeof s.id === 'string' &&
-        typeof s.title === 'string' &&
-        typeof s.text === 'string' &&
-        categories.some(([key]) => key === s.category) &&
-        ['OwnerOnly', 'Participants', 'Public'].includes(s.secrecy) &&
-        Array.isArray(s.refs) &&
-        s.refs.every(
-          (r) =>
-            r &&
-            typeof r.objectId === 'string' &&
-            typeof r.label === 'string' &&
-            ['Actor', 'Target', 'Context'].includes(r.refKind) &&
-            [
-              'Tile',
-              'City',
-              'Army',
-              'Country',
-              'Character',
-              'Region',
-              'Province',
-            ].includes(r.objectType),
-        ),
-    )
-  );
-}
 const policyKey = (p: RoundPolicySummary) =>
   `${p.quarterId}:${p.memberId}:${p.countryId}`;
 const attention = (p: RoundPolicySummary) =>
@@ -108,6 +75,9 @@ export function RoundPolicyCenter({
   const [opening, setOpening] = useState(false);
   const openingRequest = useRef<number | null>(null);
   const [sections, setSections] = useState<RoundPolicySectionInput[]>([]);
+  const [removedSections, setRemovedSections] = useState<
+    RemovedPolicySection[]
+  >([]);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -115,15 +85,12 @@ export function RoundPolicyCenter({
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [confirm, setConfirm] = useState(false);
-  const [notes, setNotes] = useState<
-    Record<string, { reason: string; interpretation: string }>
-  >({});
   const generation = useRef(0);
   const pending = useRef(false);
   const reading = useRef(false);
   const writingReview = useRef(false);
-  const live = useRef({ policy, sections, dirty, busy });
-  live.current = { policy, sections, dirty, busy };
+  const live = useRef({ policy, sections, removedSections, dirty, busy });
+  live.current = { policy, sections, removedSections, dirty, busy };
   const requestIds = useRef(new Map<string, string>());
   const handledFocus = useRef<number | undefined>(undefined);
   const handledSeed = useRef<number | undefined>(undefined);
@@ -146,13 +113,15 @@ export function RoundPolicyCenter({
   const quarter = game.currentQuarter;
   const current = policy?.quarterId === quarter.id;
   const selectedKey = policy ? policyKey(policy) : '';
-  const note = notes[selectedKey] ?? { reason: '', interpretation: '' };
-  writingReview.current = !!(note.reason || note.interpretation);
+  const reviewDraft = useReviewDrafts(game.id, policy, host);
+  const note = reviewDraft.note;
+  writingReview.current = reviewDraft.hasCurrentText;
 
   const accept = useCallback((next: RoundPolicy) => {
     setPolicy(next);
     setLoaded(true);
     setSections(next.draftSections ?? next.sections);
+    setRemovedSections([]);
     setDirty(false);
     setConfirm(false);
   }, []);
@@ -204,10 +173,17 @@ export function RoundPolicyCenter({
     openingRequest.current = null;
     setItems([]);
     setSections([]);
+    setRemovedSections([]);
     setDirty(false);
     setError('');
     setNotice('');
-    live.current = { policy: null, sections: [], dirty: false, busy: false };
+    live.current = {
+      policy: null,
+      sections: [],
+      removedSections: [],
+      dirty: false,
+      busy: false,
+    };
     handledFocus.current = undefined;
     handledSeed.current = undefined;
     return () => {
@@ -223,13 +199,13 @@ export function RoundPolicyCenter({
     return () => window.clearInterval(timer);
   }, [active, refresh]);
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty && !reviewDraft.hasUnsubmitted) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
     };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
+  }, [dirty, reviewDraft.hasUnsubmitted]);
 
   useEffect(() => {
     if (
@@ -270,18 +246,68 @@ export function RoundPolicyCenter({
       });
   }, [active, focus, game.id, accept, dirty]);
 
-  function change(next: RoundPolicySectionInput[]) {
+  function change(
+    next: RoundPolicySectionInput[],
+    removed = live.current.removedSections,
+  ) {
     if (!policy || !editable || pending.current) return;
     setSections(next);
+    setRemovedSections(removed);
     setDirty(true);
     setConfirm(false);
     setNotice('');
-    live.current = { ...live.current, sections: next, dirty: true };
+    live.current = {
+      ...live.current,
+      sections: next,
+      removedSections: removed,
+      dirty: true,
+    };
     local.write({
       revision: policy.revision,
       countryId: policy.countryId,
       sections: next,
+      removedSections: removed,
     });
+  }
+  function removeSection(id: string) {
+    const currentSections = live.current.sections;
+    const index = currentSections.findIndex((s) => s.id === id);
+    const section = currentSections[index];
+    if (!section) return;
+    const meaningful =
+      section.text.trim() || section.title.trim() || section.refs.length;
+    const removed = meaningful
+      ? [
+          ...live.current.removedSections,
+          {
+            section,
+            index,
+            beforeId: currentSections[index - 1]?.id,
+            afterId: currentSections[index + 1]?.id,
+          },
+        ]
+      : live.current.removedSections;
+    change(
+      currentSections.filter((s) => s.id !== id),
+      removed,
+    );
+  }
+  function undoRemove() {
+    const removed = live.current.removedSections;
+    const last = removed.at(-1);
+    if (!last) return;
+    const next = [...live.current.sections];
+    if (next.some((s) => s.id === last.section.id)) return;
+    const after = next.findIndex((s) => s.id === last.afterId);
+    const before = next.findIndex((s) => s.id === last.beforeId);
+    const index =
+      after >= 0
+        ? after
+        : before >= 0
+          ? before + 1
+          : Math.min(last.index, next.length);
+    next.splice(index, 0, last.section);
+    change(next, removed.slice(0, -1));
   }
   useEffect(() => {
     if (
@@ -388,7 +414,7 @@ export function RoundPolicyCenter({
     const reason = (
       target === 'Interpretation' ? note.interpretation : note.reason
     ).trim();
-    if (!policy || pending.current) return;
+    if (!policy || pending.current || reviewDraft.candidate) return;
     if (!reason) {
       setError(
         target === 'Interpretation'
@@ -413,13 +439,10 @@ export function RoundPolicyCenter({
         setItems((list) =>
           list.map((p) => (policyKey(p) === selectedKey ? next : p)),
         );
-        setNotes((all) => ({
-          ...all,
-          [selectedKey]: {
-            ...note,
-            [target === 'Interpretation' ? 'interpretation' : 'reason']: '',
-          },
-        }));
+        reviewDraft.submitted(
+          target === 'Interpretation' ? 'interpretation' : 'reason',
+          next.revision,
+        );
         setNotice('整份政策已更新。');
       }
     } catch (cause) {
@@ -642,17 +665,17 @@ export function RoundPolicyCenter({
                   label="整份政策草稿"
                   savedAt={candidate.savedAt}
                   canRestore={canRestore}
-                  preview={candidate.value.sections
-                    .map((s) => `${s.title}\n${s.text}`)
-                    .join('\n\n')}
+                  preview={policyDraftPreview(candidate.value)}
                   onRestore={() => {
                     if (!canRestore) return;
                     setSections(candidate.value.sections);
+                    setRemovedSections(candidate.value.removedSections ?? []);
                     setDirty(true);
                     local.resume();
                     live.current = {
                       ...live.current,
                       sections: candidate.value.sections,
+                      removedSections: candidate.value.removedSections ?? [],
                       dirty: true,
                     };
                   }}
@@ -663,6 +686,25 @@ export function RoundPolicyCenter({
                 <p role="alert" className="form-error">
                   {local.error}
                 </p>
+              )}
+              {!host && (
+                <PriorPolicyDrafts
+                  gameId={game.id}
+                  policy={policy}
+                  active={active}
+                />
+              )}
+              {!host && editable && removedSections.length > 0 && (
+                <div className="draft-recovery" role="status">
+                  <p>
+                    已移除 {removedSections.length}{' '}
+                    个有内容的分项。保存到服务器或正式提交前可撤销，刷新后可从本地稿恢复。
+                  </p>
+                  <button type="button" disabled={busy} onClick={undoRemove}>
+                    撤销移除：
+                    {removedSections.at(-1)!.section.title || '未命名分项'}
+                  </button>
+                </div>
               )}
               {!host && editable && (
                 <div className="quarter-actions">
@@ -730,9 +772,7 @@ export function RoundPolicyCenter({
                         <strong>分项 {index + 1}</strong>
                         <button
                           type="button"
-                          onClick={() =>
-                            change(sections.filter((s) => s.id !== section.id))
-                          }
+                          onClick={() => removeSection(section.id)}
                         >
                           移除此分项
                         </button>
@@ -916,37 +956,60 @@ export function RoundPolicyCenter({
                   ))}
                 </div>
               )}
+              {host && reviewDraft.candidate && (
+                <DraftRecovery
+                  label="审核意见与政策解释"
+                  savedAt={reviewDraft.candidate.savedAt}
+                  canRestore={
+                    reviewOpen &&
+                    reviewDraft.candidate.value.revision === policy.revision
+                  }
+                  preview={`审核意见：\n${reviewDraft.candidate.value.reason}\n\n政策解释：\n${reviewDraft.candidate.value.interpretation}`}
+                  onRestore={reviewDraft.restore}
+                  onDiscard={reviewDraft.discard}
+                />
+              )}
+              {host && reviewDraft.error && (
+                <p className="form-error" role="alert">
+                  {reviewDraft.error}
+                </p>
+              )}
               {reviewOpen && (
                 <div className="round-policy-review">
                   <h4>整份评阅</h4>
+                  {reviewDraft.hasCurrentText && !reviewDraft.candidate && (
+                    <p className="draft-message-notice" role="status">
+                      {reviewDraft.savedAt
+                        ? '此设备已暂存审核文字，尚未提交。'
+                        : '审核文字尚未提交。'}
+                    </p>
+                  )}
                   <label>
                     整份审核意见
                     <textarea
                       value={note.reason}
+                      disabled={busy || !!reviewDraft.candidate}
                       onChange={(e) =>
-                        setNotes((all) => ({
-                          ...all,
-                          [selectedKey]: { ...note, reason: e.target.value },
-                        }))
+                        reviewDraft.change('reason', e.target.value)
                       }
                       rows={3}
                     />
                   </label>
                   <div className="quarter-actions">
                     <button
-                      disabled={busy || !canDecide}
+                      disabled={busy || !canDecide || !!reviewDraft.candidate}
                       onClick={() => void review('Approved')}
                     >
                       批准整份政策
                     </button>
                     <button
-                      disabled={busy || !canDecide}
+                      disabled={busy || !canDecide || !!reviewDraft.candidate}
                       onClick={() => void review('Rejected')}
                     >
                       拒绝整份政策
                     </button>
                     <button
-                      disabled={busy || !canDecide}
+                      disabled={busy || !canDecide || !!reviewDraft.candidate}
                       onClick={() => void review('NeedPlayerInput')}
                     >
                       要求整份补充
@@ -956,20 +1019,15 @@ export function RoundPolicyCenter({
                     整份政策解释
                     <textarea
                       value={note.interpretation}
+                      disabled={busy || !!reviewDraft.candidate}
                       onChange={(e) =>
-                        setNotes((all) => ({
-                          ...all,
-                          [selectedKey]: {
-                            ...note,
-                            interpretation: e.target.value,
-                          },
-                        }))
+                        reviewDraft.change('interpretation', e.target.value)
                       }
                       rows={3}
                     />
                   </label>
                   <button
-                    disabled={busy}
+                    disabled={busy || !!reviewDraft.candidate}
                     onClick={() => void review('Interpretation')}
                   >
                     保存整份解释

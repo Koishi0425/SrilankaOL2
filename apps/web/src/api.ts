@@ -738,10 +738,12 @@ export async function fetchMyRoundPolicy(gameId: string, quarterId: string) {
 export async function fetchRoundPolicy(
   gameId: string,
   policy: RoundPolicySummary,
+  signal?: AbortSignal,
 ) {
   return (
     await apiRequest<RoundPolicy>(
       `/games/${gameId}/quarters/${policy.quarterId}/policy-submissions/${policy.memberId}?countryId=${policy.countryId}`,
+      { signal },
     )
   ).data;
 }
