@@ -123,27 +123,16 @@ beforeEach(async () => {
     login('map-host'),
     login('map-player'),
   ]);
-  await world.setup.create(gameId, hostId, {
-    name: '诸国地图',
-    width: 4,
-    height: 3,
-  });
-  tiles = (await viewport(hostId)).tiles.map((tile) => tile.id);
 });
 afterAll(async () => {
   await app.close();
   await database.end();
 });
 
-describe('map preparation and exploration', () => {
+describe('large map generation', () => {
   it('creates a large generated map, reselects it without old vision, and protects subsequent manual work', async () => {
-    const generatedGame = await games.create({
-      userId: hostId,
-      name: '大型地图试局',
-      countryNames: ['甲国', '乙国', '丙国', '丁国'],
-    });
-    const countries = await games.listCountries(generatedGame.id, hostId);
-    const url = `/api/v1/games/${generatedGame.id}/map`;
+    const countries = await games.listCountries(gameId, hostId);
+    const url = `/api/v1/games/${gameId}/map`;
     const headers = { cookie: hostCookie };
     const created = await app.inject({
       method: 'POST',
@@ -166,7 +155,7 @@ describe('map preparation and exploration', () => {
       (
         await database.query(
           'SELECT id FROM country_tile_knowledge WHERE game_id=$1',
-          [generatedGame.id],
+          [gameId],
         )
       ).rowCount,
     ).toBeGreaterThan(0);
@@ -186,7 +175,7 @@ describe('map preparation and exploration', () => {
       (
         await database.query(
           'SELECT id FROM country_tile_knowledge WHERE game_id=$1',
-          [generatedGame.id],
+          [gameId],
         )
       ).rowCount,
     ).toBe(0);
@@ -194,13 +183,13 @@ describe('map preparation and exploration', () => {
       id: string;
       controller_country_id: string | null;
     }>('SELECT id,controller_country_id FROM hex_tiles WHERE game_id=$1', [
-      generatedGame.id,
+      gameId,
     ]);
     expect(tiles.rows).toHaveLength(2816);
     expect(tiles.rows.every((t) => t.controller_country_id === null)).toBe(
       true,
     );
-    const edited = await world.setup.batch(generatedGame.id, hostId, {
+    const edited = await world.setup.batch(gameId, hostId, {
       expectedRevision: next.map!.revision!,
       tileIds: [tiles.rows[0]!.id],
       controllerCountryId: countries[0]!.id,
@@ -217,6 +206,17 @@ describe('map preparation and exploration', () => {
     expect(blocked.statusCode).toBe(409);
     expect(blocked.json().error.code).toBe('MAP_GENERATION_HAS_CONTENT');
   }, 30_000);
+});
+
+describe('map preparation and exploration', () => {
+  beforeEach(async () => {
+    await world.setup.create(gameId, hostId, {
+      name: '诸国地图',
+      width: 4,
+      height: 3,
+    });
+    tiles = (await viewport(hostId)).tiles.map((tile) => tile.id);
+  });
   it('runs two countries through province policies, host settlement, updated map context and the next quarter', async () => {
     for (const [index, name, owner] of [
       [0, '北省', countryId],
