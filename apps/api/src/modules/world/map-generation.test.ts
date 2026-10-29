@@ -7,10 +7,11 @@ import { WorldService } from './world-service.js';
 import { ApiFault } from '../../errors.js';
 import type { AuthService } from '../auth/auth-service.js';
 import { PGlite } from '@electric-sql/pglite';
-import type { DatabasePool } from '@srilanka/database';
+import type { DatabasePool, DatabaseClient } from '@srilanka/database';
 import { generateMap, generationDefaults } from '@srilanka/contracts';
 import { beforeAll, beforeEach, afterAll, expect, it } from 'vitest';
 import { MapSetupService } from './map-setup-service.js';
+import { refreshCountryVision } from './map-vision.js';
 
 it('reproduces geography with unique in-bounds coordinates and changes it with the seed', () => {
   const first = generateMap(40, 28, generationDefaults);
@@ -73,7 +74,10 @@ const pg = new PGlite();
 const client = {
   async query(sql: string, params?: unknown[]) {
     const result = await pg.query(sql, params);
-    return { rows: result.rows, rowCount: result.affectedRows };
+    return {
+      rows: result.rows,
+      rowCount: result.rows.length || result.affectedRows,
+    };
   },
   release() {},
 };
@@ -162,8 +166,166 @@ it('saves the exact preview, ownership and water movement rules in one creation'
     saved.map(({ q, r, terrain, countryId }) => ({ q, r, terrain, countryId })),
   ).toEqual(generateMap(24, 16, options));
   expect(saved.every((t) => t.passable === (t.terrain !== 'water'))).toBe(true);
-  expect(result.generationBlockedReason).toBeTruthy();
+  expect(result.generationBlockedReason).toBeUndefined();
   expect(result.map!.revision).toBe(2);
+});
+it('can reselect an untouched generated map and removes its old automatic observations', async () => {
+  const initial = await setup.create(gameId, hostId, {
+    name: '未布置的自动地图',
+    width: 16,
+    height: 12,
+    generation: {
+      ...generationDefaults,
+      countryIds: [countryId, otherCountryId],
+    },
+  });
+  expect(
+    (
+      await pg.query('SELECT id FROM country_tile_knowledge WHERE game_id=$1', [
+        gameId,
+      ])
+    ).rows.length,
+  ).toBeGreaterThan(0);
+  const oldKnowledge = (
+    await pg.query(
+      'SELECT * FROM country_tile_knowledge WHERE game_id=$1 ORDER BY id',
+      [gameId],
+    )
+  ).rows;
+  await expect(
+    setup.generate(gameId, hostId, {
+      ...generationDefaults,
+      countryIds: [randomUUID()],
+      expectedRevision: initial.map!.revision!,
+    }),
+  ).rejects.toMatchObject({ code: 'INVALID_MAP_COUNTRY' });
+  expect(
+    (
+      await pg.query(
+        'SELECT * FROM country_tile_knowledge WHERE game_id=$1 ORDER BY id',
+        [gameId],
+      )
+    ).rows,
+  ).toEqual(oldKnowledge);
+  const ids = (await tiles()).map((t) => t.id);
+  const next = await setup.generate(gameId, hostId, {
+    ...generationDefaults,
+    seed: 'reselected',
+    expectedRevision: initial.map!.revision!,
+  });
+  expect((await tiles()).map((t) => t.id)).toEqual(ids);
+  expect((await tiles()).every((t) => t.countryId === null)).toBe(true);
+  expect(
+    (
+      await pg.query('SELECT id FROM country_tile_knowledge WHERE game_id=$1', [
+        gameId,
+      ])
+    ).rows,
+  ).toHaveLength(0);
+  expect(next.generationBlockedReason).toBeUndefined();
+  await setup.generate(gameId, hostId, {
+    ...generationDefaults,
+    seed: 'reselected-again',
+    countryIds: [otherCountryId],
+    expectedRevision: next.map!.revision!,
+  });
+  expect(
+    (await tiles())
+      .filter((t) => t.terrain !== 'water')
+      .every((t) => t.countryId === otherCountryId),
+  ).toBe(true);
+  expect(
+    (
+      await pg.query<{ country_id: string }>(
+        'SELECT DISTINCT country_id FROM country_tile_knowledge WHERE game_id=$1',
+        [gameId],
+      )
+    ).rows,
+  ).toEqual([{ country_id: otherCountryId }]);
+});
+it.each(['batch', 'knowledge', 'city'] as const)(
+  'locks generated territory after a manual %s change',
+  async (kind) => {
+    const initial = await setup.create(gameId, hostId, {
+      name: '已经布置的自动地图',
+      width: 8,
+      height: 6,
+      generation: { ...generationDefaults, countryIds: [countryId] },
+    });
+    const id = (await tiles())[0]!.id;
+    if (kind === 'batch')
+      await setup.batch(gameId, hostId, {
+        expectedRevision: initial.map!.revision!,
+        tileIds: [id],
+        controllerCountryId: otherCountryId,
+      });
+    if (kind === 'knowledge')
+      await setup.knowledge(gameId, hostId, {
+        expectedRevision: initial.map!.revision!,
+        countryId: otherCountryId,
+        tileIds: [id],
+        state: 'Mapped',
+        note: '主持人发放的资料',
+      });
+    if (kind === 'city')
+      await pg.query(
+        "INSERT INTO cities(id,game_id,tile_id,name) VALUES($1,$2,$3,'新城市')",
+        [randomUUID(), gameId, id],
+      );
+    const before = await tiles();
+    const current = await setup.get(gameId, hostId);
+    expect(current.generationBlockedReason).toBeTruthy();
+    await expect(
+      setup.generate(gameId, hostId, {
+        ...generationDefaults,
+        expectedRevision: current.map!.revision!,
+      }),
+    ).rejects.toMatchObject({ code: 'MAP_GENERATION_HAS_CONTENT' });
+    expect(await tiles()).toEqual(before);
+  },
+);
+it('keeps radius-two vision correct on odd/even rows and map boundaries', async () => {
+  await setup.create(gameId, hostId, {
+    name: '视野坐标',
+    width: 12,
+    height: 8,
+  });
+  const all = await tiles();
+  const axial = (q: number, r: number) => [q - (r - (r & 1)) / 2, r] as const;
+  for (const [q, r] of [
+    [0, 0],
+    [3, 2],
+    [3, 3],
+    [11, 7],
+  ]) {
+    await pg.query(
+      'UPDATE hex_tiles SET controller_country_id=CASE WHEN q=$2 AND r=$3 THEN $4::uuid ELSE NULL END WHERE game_id=$1',
+      [gameId, q, r, countryId],
+    );
+    await pg.query('DELETE FROM country_tile_knowledge WHERE game_id=$1', [
+      gameId,
+    ]);
+    await refreshCountryVision(client as unknown as DatabaseClient, gameId);
+    const visible = (
+      await pg.query<{ tile_id: string }>(
+        "SELECT tile_id FROM country_tile_knowledge WHERE game_id=$1 AND country_id=$2 AND discovery_state='Observed'",
+        [gameId, countryId],
+      )
+    ).rows
+      .map((t) => t.tile_id)
+      .sort();
+    const origin = axial(q!, r!);
+    const expected = all
+      .filter((t) => {
+        const target = axial(t.q, t.r),
+          dq = target[0] - origin[0],
+          dr = target[1] - origin[1];
+        return Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr)) <= 2;
+      })
+      .map((t) => t.id)
+      .sort();
+    expect(visible).toEqual(expected);
+  }
 });
 it('regenerates only unconfigured opening geography, retains tile IDs and stores before/after history', async () => {
   const initial = await setup.create(gameId, hostId, {

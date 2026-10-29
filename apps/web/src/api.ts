@@ -1006,25 +1006,34 @@ export async function publishSettlement(
   ).data;
 }
 
-export async function fetchMapSetup(gameId: string) {
-  return (await apiRequest<MapSetupData>(`/games/${gameId}/map/setup`)).data;
+export async function fetchMapSetup(gameId: string, signal?: AbortSignal) {
+  return (
+    await apiRequest<MapSetupData>(`/games/${gameId}/map/setup`, { signal })
+  ).data;
 }
-export async function createMap(gameId: string, input: CreateMapInput) {
+export async function createMap(
+  gameId: string,
+  input: CreateMapInput,
+  signal?: AbortSignal,
+) {
   return (
     await apiRequest<MapSetupData>(`/games/${gameId}/map`, {
       method: 'POST',
       body: JSON.stringify(input),
+      signal,
     })
   ).data;
 }
 export async function generateMapTerrain(
   gameId: string,
   input: MapGenerationOptions & { expectedRevision: number },
+  signal?: AbortSignal,
 ) {
   return (
     await apiRequest<MapSetupData>(`/games/${gameId}/map/generate`, {
       method: 'POST',
       body: JSON.stringify(input),
+      signal,
     })
   ).data;
 }

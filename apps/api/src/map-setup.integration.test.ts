@@ -9,6 +9,7 @@ import { ActionService } from './modules/actions/action-service.js';
 import { SettlementService } from './modules/settlements/settlement-service.js';
 import { WorldService } from './modules/world/world-service.js';
 import { economicBillInput } from './modules/settlements/economy.js';
+import { generationDefaults, type MapSetupData } from '@srilanka/contracts';
 
 const config = loadServiceConfig({ ...process.env, NODE_ENV: 'test' });
 const database = createDatabasePool(config.databaseUrl);
@@ -135,6 +136,87 @@ afterAll(async () => {
 });
 
 describe('map preparation and exploration', () => {
+  it('creates a large generated map, reselects it without old vision, and protects subsequent manual work', async () => {
+    const generatedGame = await games.create({
+      userId: hostId,
+      name: '大型地图试局',
+      countryNames: ['甲国', '乙国', '丙国', '丁国'],
+    });
+    const countries = await games.listCountries(generatedGame.id, hostId);
+    const url = `/api/v1/games/${generatedGame.id}/map`;
+    const headers = { cookie: hostCookie };
+    const created = await app.inject({
+      method: 'POST',
+      url,
+      headers,
+      payload: {
+        name: '大型自动地图',
+        width: 64,
+        height: 44,
+        generation: {
+          ...generationDefaults,
+          countryIds: countries.map((c) => c.id),
+        },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const initial = created.json<{ data: MapSetupData }>().data;
+    expect(initial.generationBlockedReason).toBeUndefined();
+    expect(
+      (
+        await database.query(
+          'SELECT id FROM country_tile_knowledge WHERE game_id=$1',
+          [generatedGame.id],
+        )
+      ).rowCount,
+    ).toBeGreaterThan(0);
+    const reselected = await app.inject({
+      method: 'POST',
+      url: `${url}/generate`,
+      headers,
+      payload: {
+        ...generationDefaults,
+        seed: 'reselected-large-map',
+        expectedRevision: initial.map!.revision!,
+      },
+    });
+    expect(reselected.statusCode).toBe(200);
+    const next = reselected.json<{ data: MapSetupData }>().data;
+    expect(
+      (
+        await database.query(
+          'SELECT id FROM country_tile_knowledge WHERE game_id=$1',
+          [generatedGame.id],
+        )
+      ).rowCount,
+    ).toBe(0);
+    const tiles = await database.query<{
+      id: string;
+      controller_country_id: string | null;
+    }>('SELECT id,controller_country_id FROM hex_tiles WHERE game_id=$1', [
+      generatedGame.id,
+    ]);
+    expect(tiles.rows).toHaveLength(2816);
+    expect(tiles.rows.every((t) => t.controller_country_id === null)).toBe(
+      true,
+    );
+    const edited = await world.setup.batch(generatedGame.id, hostId, {
+      expectedRevision: next.map!.revision!,
+      tileIds: [tiles.rows[0]!.id],
+      controllerCountryId: countries[0]!.id,
+    });
+    const blocked = await app.inject({
+      method: 'POST',
+      url: `${url}/generate`,
+      headers,
+      payload: {
+        ...generationDefaults,
+        expectedRevision: edited.map!.revision!,
+      },
+    });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json().error.code).toBe('MAP_GENERATION_HAS_CONTENT');
+  }, 30_000);
   it('runs two countries through province policies, host settlement, updated map context and the next quarter', async () => {
     for (const [index, name, owner] of [
       [0, '北省', countryId],

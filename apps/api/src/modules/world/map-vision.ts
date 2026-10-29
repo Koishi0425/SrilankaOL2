@@ -2,6 +2,8 @@ import type { DatabaseClient } from '@srilanka/database';
 
 // Convert odd-row coordinates to axial coordinates before applying the
 // nineteen offsets in a two-hex radius. This is observation, not movement.
+// Derive both target coordinates from the origin and offset so PostgreSQL can
+// use the (game_id,q,r) index instead of scanning a row for every origin.
 const offsets: string[] = [];
 for (let q = -2; q <= 2; q++)
   for (let r = -2; r <= 2; r++)
@@ -18,7 +20,7 @@ const visibility = `WITH origins AS (
   SELECT DISTINCT o.country_id,t.id AS tile_id
   FROM origins o CROSS JOIN (VALUES ${offsets.join(',')}) AS d(q,r)
   JOIN hex_tiles t ON t.game_id=$1 AND t.r=o.r+d.r
-    AND t.q=o.q+d.q+(t.r-(t.r&1))/2
+    AND t.q=o.q+d.q+((o.r+d.r)-((o.r+d.r)&1))/2
   JOIN countries c ON c.game_id=t.game_id AND c.id=o.country_id AND c.status='Active'
   WHERE NOT EXISTS(SELECT 1 FROM tile_tags s JOIN quarters q ON q.game_id=s.game_id AND q.is_current
     WHERE s.game_id=t.game_id AND s.tile_id=t.id AND s.blocks_observation AND s.starts_sequence<=q.sequence_number AND (s.ends_sequence IS NULL OR s.ends_sequence>=q.sequence_number))

@@ -83,6 +83,26 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe('map editing and reveal workflow', () => {
+  it('opens a real regeneration button and explains when manual setup protects the map', async () => {
+    const callbacks = props();
+    const view = render(<MapSetupPanel {...callbacks} />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: '重新选择地形' }),
+    );
+    expect(
+      screen.getByRole('button', { name: '确认地形，下一步' }),
+    ).toBeInTheDocument();
+    view.unmount();
+    vi.mocked(fetchMapSetup).mockResolvedValue({
+      ...setup,
+      generationBlockedReason: '已有手动布置',
+    });
+    render(<MapSetupPanel {...callbacks} />);
+    expect(
+      await screen.findByRole('button', { name: '重新选择地形' }),
+    ).toBeDisabled();
+    expect(screen.getByText('已有手动布置')).toBeInTheDocument();
+  });
   it('retains a failed batch and selection, then retries against the refreshed revision', async () => {
     const callbacks = props();
     render(<MapSetupPanel {...callbacks} />);

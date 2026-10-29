@@ -63,6 +63,7 @@ export function MapSetupPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [regenerating, setRegenerating] = useState(false);
   const [mode, setMode] = useState('tiles');
   const [tag, setTag] = useState({ ...emptyTileTag });
   const [terrain, setTerrain] = useState('');
@@ -217,26 +218,39 @@ export function MapSetupPanel({
       ) : (
         <>
           {canInitialize && game.status === 'Preparing' && !seed && (
-            <details>
-              <summary>自动生成地形</summary>
-              <MapGenerator
-                onRefresh={(data) => {
-                  setSetup(data);
-                  if (data.map) onChanged(data.map);
-                }}
-                key={setup.map.id}
-                gameId={game.id}
-                countries={countries}
-                map={setup.map}
-                blockedReason={setup.generationBlockedReason}
-                onSelection={onSelection}
-                onChanged={(data) => {
-                  setSetup(data);
-                  if (data.map) onChanged(data.map);
-                  setMessage('地形已生成');
-                }}
-              />
-            </details>
+            <div>
+              <button
+                type="button"
+                disabled={busy || !!setup.generationBlockedReason}
+                aria-expanded={regenerating}
+                onClick={() => setRegenerating(!regenerating)}
+              >
+                {regenerating ? '收起地形预览' : '重新选择地形'}
+              </button>
+              {setup.generationBlockedReason && (
+                <p className="muted">{setup.generationBlockedReason}</p>
+              )}
+              {regenerating && (
+                <MapGenerator
+                  onRefresh={(data) => {
+                    setSetup(data);
+                    if (data.map) onChanged(data.map);
+                  }}
+                  key={setup.map.id}
+                  gameId={game.id}
+                  countries={countries}
+                  map={setup.map}
+                  blockedReason={setup.generationBlockedReason}
+                  onSelection={onSelection}
+                  onChanged={(data) => {
+                    setSetup(data);
+                    if (data.map) onChanged(data.map);
+                    setMessage('地形已生成');
+                    setRegenerating(false);
+                  }}
+                />
+              )}
+            </div>
           )}
           <div className="map-setup-tabs">
             <button

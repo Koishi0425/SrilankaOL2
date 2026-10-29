@@ -586,6 +586,21 @@ legend {
   display: grid;
   gap: 12px;
 }
+.map-generator-steps,
+.map-generator-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.map-generator-steps {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.map-generator-steps [aria-current='step'] {
+  color: var(--accent);
+  font-weight: 700;
+}
 .map-generator label {
   display: grid;
   gap: 6px;

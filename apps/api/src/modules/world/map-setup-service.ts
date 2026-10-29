@@ -74,7 +74,7 @@ export class MapSetupService {
     return {
       generationBlockedReason:
         map && (await generationBlocked(this.database, gameId))
-          ? '已有国家归属、地区、城市、军队、道路或已知情报，请使用笔刷与批量工具调整。'
+          ? '地图已有手动布置或情报记录，整体重新生成已锁定。请使用笔刷与批量工具调整。'
           : undefined,
       map: map
         ? {
@@ -244,7 +244,7 @@ export class MapSetupService {
         throw new ApiFault(
           409,
           'MAP_GENERATION_HAS_CONTENT',
-          '已有国家归属、地区、城市、军队、道路或已知情报，不能重新生成，请使用批量工具调整。',
+          '地图已有手动布置或情报记录，不能整体重新生成，请使用批量工具调整。',
         );
       const maps = await db.query<{ width: number; height: number }>(
         'SELECT width,height FROM world_maps WHERE game_id=$1',
@@ -256,6 +256,12 @@ export class MapSetupService {
       );
       const tileIds = ids.rows.map((t) => t.id);
       const before = await captureTiles(db, gameId, tileIds);
+      // Only untouched generated territory passes the guard above. Its automatic
+      // observations belong to the previous preview and must not survive a new map.
+      await db.query(
+        "DELETE FROM country_tile_knowledge WHERE game_id=$1 AND snapshot->>'automaticObservation'='true'",
+        [gameId],
+      );
       await applyGeneration(
         db,
         gameId,
