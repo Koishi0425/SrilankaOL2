@@ -7,6 +7,8 @@ import type {
 } from '@srilanka/contracts';
 import { TileTagFields, emptyTileTag } from '../map/TileTags.js';
 import { fetchSettlementStateOptions } from '../api.js';
+import { TileRangePreview } from '../map/TileRangePreview.js';
+import { TileTagChangeRecord } from './TileTagChangeRecord.js';
 export function TileTagChangeEditor({
   gameId,
   quarterId,
@@ -14,8 +16,8 @@ export function TileTagChangeEditor({
   changes,
   busy,
   onChange,
-  onRevision,
   revision,
+  hasWorldChanges = changes.length > 0,
   refs = [],
 }: {
   gameId: string;
@@ -23,9 +25,11 @@ export function TileTagChangeEditor({
   actionId: string | null;
   changes: SettlementStateChange[];
   busy: boolean;
-  onChange: (changes: SettlementStateChange[]) => void;
-  onRevision: (revision: number) => void;
+  // Additions carry their source snapshot in the same update. Removal leaves
+  // the snapshot unchanged so remaining plans are never silently rebased.
+  onChange: (changes: SettlementStateChange[], mapRevision?: number) => void;
   revision?: number;
+  hasWorldChanges?: boolean;
   refs?: Array<Omit<ActionObjectRef, 'id'>>;
 }) {
   const [open, setOpen] = useState(false),
@@ -33,6 +37,7 @@ export function TileTagChangeEditor({
     [error, setError] = useState('');
   const [tag, setTag] = useState({ ...emptyTileTag }),
     [remove, setRemove] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
   const [rect, setRect] = useState({ minQ: '', maxQ: '', minR: '', maxR: '' }),
     [targets, setTargets] = useState(
       refs.some(
@@ -61,15 +66,12 @@ export function TileTagChangeEditor({
     };
   }, [open, gameId, quarterId]);
   const scoped = changes.filter(
-    (c) => c.kind === 'TileTag' && c.actionId === actionId,
+    (c): c is Extract<SettlementStateChange, { kind: 'TileTag' }> =>
+      c.kind === 'TileTag' && c.actionId === actionId,
   );
-  function add() {
-    if (!options || busy || loading) return;
-    if (changes.length && options.mapRevision !== revision) {
-      setError('地图已变化，请保存或移除原有变化并重新检查。');
-      return;
-    }
-    const tileIds = targets
+  const tileIds = !options
+    ? []
+    : targets
       ? [
           ...new Set(
             refs
@@ -98,6 +100,19 @@ export function TileTagChangeEditor({
                 t.r <= Number(rect.maxR),
             )
             .map((t) => t.id);
+  const previewIds =
+    preview === 'selection'
+      ? tileIds
+      : scoped.find((c) => c.id === preview)?.tileIds;
+  function add() {
+    if (!options || busy || loading) return;
+    if (
+      (hasWorldChanges || changes.length > 0) &&
+      options.mapRevision !== revision
+    ) {
+      setError('地图已变化，请保存或移除原有变化并重新检查。');
+      return;
+    }
     if (!tileIds.length || tileIds.length > 2500 || !validTileTag(tag)) {
       setError(
         '请填写状态名称，并选择政策关联地块或有效矩形（最多 2500 格）。',
@@ -115,19 +130,21 @@ export function TileTagChangeEditor({
       setError('已有同名状态变化涉及这些地块，请合并后添加。');
       return;
     }
-    onRevision(options.mapRevision);
-    onChange([
-      ...changes,
-      {
-        id: crypto.randomUUID(),
-        actionId,
-        kind: 'TileTag',
-        operation: remove ? 'Remove' : 'Set',
-        tileIds,
-        tag: { ...tag, name: tag.name.trim() },
-        summary: `${tileIds.length} 格：${remove ? '移除' : '设置'} ${tag.name.trim()}${remove ? '' : '（下回合生效）'}`,
-      },
-    ]);
+    onChange(
+      [
+        ...changes,
+        {
+          id: crypto.randomUUID(),
+          actionId,
+          kind: 'TileTag',
+          operation: remove ? 'Remove' : 'Set',
+          tileIds,
+          tag: { ...tag, name: tag.name.trim() },
+          summary: `${tileIds.length} 格：${remove ? '移除' : '设置'} ${tag.name.trim()}${remove ? '' : '（下回合生效）'}`,
+        },
+      ],
+      options.mapRevision,
+    );
     setError('');
   }
   return (
@@ -139,7 +156,16 @@ export function TileTagChangeEditor({
       <summary>地块状态{scoped.length ? `（${scoped.length}）` : ''}</summary>
       {scoped.map((c) => (
         <p key={c.id}>
-          {c.summary}
+          <TileTagChangeRecord change={c} />
+          {open && (
+            <button
+              type="button"
+              disabled={loading || !options}
+              onClick={() => setPreview(c.id)}
+            >
+              在地图上预览范围
+            </button>
+          )}
           <button
             disabled={busy}
             onClick={() => onChange(changes.filter((item) => item.id !== c.id))}
@@ -159,6 +185,19 @@ export function TileTagChangeEditor({
             </p>
           )}
           {loading && <p role="status">读取地块…</p>}
+          {options && previewIds && (
+            <>
+              <TileRangePreview tiles={options.tiles} tileIds={previewIds} />
+              {hasWorldChanges && options.mapRevision !== revision && (
+                <p role="alert">
+                  地图版本已变化，此处仅按当前坐标预览，请重新核对原计划。
+                </p>
+              )}
+              <button type="button" onClick={() => setPreview(null)}>
+                收起范围预览
+              </button>
+            </>
+          )}
           <fieldset disabled={busy || loading} className="draft-fields">
             <label className="check-row">
               <input
@@ -193,6 +232,14 @@ export function TileTagChangeEditor({
               移除同名状态
             </label>
             <TileTagFields value={tag} onChange={setTag} />
+            <p>当前选中 {tileIds.length} 格。</p>
+            <button
+              type="button"
+              disabled={!options || !tileIds.length || tileIds.length > 2500}
+              onClick={() => setPreview('selection')}
+            >
+              在地图上预览待添加范围
+            </button>
             <button disabled={!options} onClick={add}>
               添加地块状态计划
             </button>

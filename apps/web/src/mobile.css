@@ -331,7 +331,14 @@
     gap: 8px;
   }
   .mobile-policy-actions > button:first-child {
-    grid-column: 1 / -1;
+    grid-column: 1;
+  }
+  .mobile-policy-actions > span {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+    text-align: right;
+    font-size: 12px;
   }
   .workspace-drawer .message-layout .center-detail {
     display: flex;

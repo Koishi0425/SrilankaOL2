@@ -10,6 +10,7 @@ import type {
   QuarterSettlement,
   ResourceChange,
   SettlementRecruitment,
+  SettlementStateChange,
 } from '@srilanka/contracts';
 import {
   resourceTotals,
@@ -87,6 +88,37 @@ const report: QuarterSettlement = {
   ],
 };
 afterEach(cleanup);
+
+it('retains tile-state parameters in the published host record', () => {
+  const change: SettlementStateChange = {
+    id: 'tag',
+    actionId: 'canal',
+    kind: 'TileTag',
+    operation: 'Set',
+    tileIds: ['tile'],
+    tag: {
+      name: '浓雾',
+      description: '',
+      taxPercent: 0,
+      productionPercent: 0,
+      duration: null,
+      blocksObservation: true,
+    },
+    summary: '1 格：设置 浓雾（下回合生效）',
+  };
+  render(
+    <SettlementReport
+      data={{ ...report, stateChanges: [change] }}
+      host
+      onError={vi.fn()}
+    />,
+  );
+  expect(
+    screen.getByText(
+      /税收贡献 0% · 生产贡献 0% · 持续至主持人移除 · 遮蔽实时视野/,
+    ),
+  ).toBeVisible();
+});
 
 it('shows shared feedback without offering the original policy or its discussion', () => {
   render(

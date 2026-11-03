@@ -1030,9 +1030,19 @@ export function SettlementPanel({
                       busy={busy}
                       refs={action?.refs ?? []}
                       revision={data.mapRevision}
-                      onRevision={updateMapRevision}
-                      onChange={(stateChanges) =>
-                        modified({ ...data, stateChanges })
+                      hasWorldChanges={
+                        !!(
+                          data.stateChanges?.length ||
+                          data.battles?.length ||
+                          data.recruitments?.length
+                        )
+                      }
+                      onChange={(stateChanges, mapRevision) =>
+                        modified({
+                          ...data,
+                          stateChanges,
+                          ...(mapRevision === undefined ? {} : { mapRevision }),
+                        })
                       }
                     />
                     <StateChangeEditor

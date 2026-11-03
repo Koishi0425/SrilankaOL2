@@ -7,6 +7,7 @@ import type {
 } from '@srilanka/contracts';
 import { provinceStatFields } from '@srilanka/contracts';
 import { fetchSettlementStateOptions } from '../api.js';
+import { TileTagChangeRecord } from './TileTagChangeRecord.js';
 const provinceFields = [
   { key: 'taxBase', label: '税收基础', min: 0, max: 1000000, step: 1 },
   { key: 'productionBase', label: '生产基础', min: 0, max: 1000000, step: 1 },
@@ -21,6 +22,8 @@ export function StateChangeRecord({
   change: SettlementStateChange;
   prefix?: string;
 }) {
+  if (change.kind === 'TileTag')
+    return <TileTagChangeRecord change={change} prefix={prefix} />;
   return (
     <span>
       {prefix}

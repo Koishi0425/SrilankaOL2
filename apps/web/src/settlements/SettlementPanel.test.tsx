@@ -12,6 +12,7 @@ import type {
   QuarterSettlement,
   DiplomacyChange,
   GovernmentChange,
+  SettlementStateChange,
 } from '@srilanka/contracts';
 import { toDiplomacyInput, toGovernmentInput } from '@srilanka/contracts';
 import type * as ApiModule from '../api.js';
@@ -134,6 +135,208 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('settlement writing and publication', () => {
+  it('saves the first tile-state plan with its loaded map revision while preserving a dirty public report', async () => {
+    const initial = { ...draft, mapRevision: 7, stateChanges: [] };
+    vi.mocked(fetchSettlement).mockResolvedValue(initial);
+    const options = await fetchSettlementStateOptions('game', 'quarter');
+    vi.mocked(fetchSettlementStateOptions).mockResolvedValue({
+      ...options,
+      mapRevision: 8,
+    });
+    vi.mocked(saveSettlement).mockImplementation(async (_g, _q, input) => {
+      if (input.expectedMapRevision !== 8) throw new Error('地图已变化');
+      return {
+        ...initial,
+        version: 2,
+        mapRevision: 8,
+        publicReport: input.publicReport,
+        stateChanges: (input.stateChanges ?? []).flatMap((change) =>
+          change.kind === 'TileTag'
+            ? [{ ...change, summary: '1 格：设置 遭到破坏（下回合生效）' }]
+            : [],
+        ),
+      };
+    });
+    render(<SettlementPanel game={game} onQuarterChange={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText('回合公报（全员可见）'), {
+      target: { value: '尚未保存的本季公报' },
+    });
+    fireEvent.click(screen.getByText('地块状态'));
+    await waitFor(() => expect(screen.getByLabelText('起始列')).toBeEnabled());
+    for (const label of ['起始列', '结束列', '起始行', '结束行'])
+      fireEvent.change(screen.getByLabelText(label), {
+        target: { value: '0' },
+      });
+    fireEvent.change(screen.getByLabelText('状态预设'), {
+      target: { value: 'damage' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '添加地块状态计划' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(saveSettlement).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(saveSettlement).mock.lastCall![2]).toMatchObject({
+      publicReport: '尚未保存的本季公报',
+      expectedMapRevision: 8,
+      stateChanges: [
+        expect.objectContaining({
+          kind: 'TileTag',
+          tileIds: ['tile-a'],
+          tag: expect.objectContaining({ name: '遭到破坏' }),
+        }),
+      ],
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '保存草稿' })).toBeDisabled(),
+    );
+    expect(screen.getByLabelText('回合公报（全员可见）')).toHaveValue(
+      '尚未保存的本季公报',
+    );
+    expect(screen.queryByText('地图已变化')).not.toBeInTheDocument();
+    expect(screen.getByText(/1 格：设置 遭到破坏/)).toBeInTheDocument();
+    expect(publishSettlement).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: 'state changes',
+      plans: {
+        stateChanges: [
+          {
+            id: 'existing-state',
+            actionId: null,
+            kind: 'ArmyStrength',
+            armyId: 'army',
+            strength: 900,
+            summary: '北军兵力 900',
+          },
+        ],
+      },
+    },
+    {
+      name: 'battles',
+      plans: {
+        battles: [
+          {
+            id: 'existing-battle',
+            actionId: null,
+            title: '待裁决战斗',
+            kind: 'Field',
+            tileId: 'tile-a',
+            attackers: [],
+            defenders: [],
+            resolution: null,
+            q: 0,
+            r: 0,
+            participants: [],
+            effects: [],
+            rolls: [],
+          },
+        ],
+      },
+    },
+    {
+      name: 'recruitments',
+      plans: {
+        recruitments: [
+          {
+            id: 'existing-recruitment',
+            actionId: null,
+            kind: 'Create',
+            countryId: 'country',
+            countryName: '康提',
+            name: '新军',
+            armyName: '新军',
+            tileId: 'tile-a',
+            q: 0,
+            r: 0,
+            strength: 300,
+            beforeStrength: 0,
+            afterStrength: 300,
+            treasuryCost: 20,
+            manpowerCost: 300,
+            expectedResourceRevision: 2,
+            note: '',
+            summary: '组建新军',
+            costs: [],
+          },
+        ],
+      },
+    },
+  ] satisfies Array<{ name: string; plans: Partial<QuarterSettlement> }>)(
+    'keeps the old map snapshot when $name exist and the tile-state picker sees a newer map',
+    async ({ plans }) => {
+      const initial = { ...draft, mapRevision: 7, ...plans };
+      vi.mocked(fetchSettlement).mockResolvedValue(initial);
+      const options = await fetchSettlementStateOptions('game', 'quarter');
+      vi.mocked(fetchSettlementStateOptions).mockResolvedValue({
+        ...options,
+        mapRevision: 8,
+      });
+      vi.mocked(saveSettlement).mockResolvedValue({ ...initial, version: 2 });
+      render(<SettlementPanel game={game} onQuarterChange={vi.fn()} />);
+      fireEvent.change(await screen.findByLabelText('回合公报（全员可见）'), {
+        target: { value: '已有计划时继续写的公报' },
+      });
+      fireEvent.click(screen.getByText('地块状态'));
+      await waitFor(() =>
+        expect(screen.getByLabelText('起始列')).toBeEnabled(),
+      );
+      for (const label of ['起始列', '结束列', '起始行', '结束行'])
+        fireEvent.change(screen.getByLabelText(label), {
+          target: { value: '0' },
+        });
+      fireEvent.change(screen.getByLabelText('状态预设'), {
+        target: { value: 'damage' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: '添加地块状态计划' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('地图已变化');
+      expect(screen.queryByText(/1 格：设置 遭到破坏/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+      await waitFor(() => expect(saveSettlement).toHaveBeenCalledTimes(1));
+      expect(
+        vi.mocked(saveSettlement).mock.lastCall![2].expectedMapRevision,
+      ).toBe(7);
+      expect(vi.mocked(saveSettlement).mock.lastCall![2].publicReport).toBe(
+        '已有计划时继续写的公报',
+      );
+    },
+  );
+
+  it('shows saved tile-state effects and duration in the final publication review without publishing early', async () => {
+    const plan: SettlementStateChange = {
+      id: 'tag-plan',
+      actionId: null,
+      kind: 'TileTag',
+      operation: 'Set',
+      tileIds: ['tile-a'],
+      tag: {
+        name: '遭到破坏',
+        description: '',
+        taxPercent: 0,
+        productionPercent: -50,
+        duration: 4,
+        blocksObservation: false,
+      },
+      summary: '1 格：设置 遭到破坏（下回合生效）',
+    };
+    vi.mocked(fetchSettlement).mockResolvedValue({
+      ...draft,
+      actions: draft.actions.map((a) => ({ ...a, feedback: '计划已核对。' })),
+      mapRevision: 7,
+      stateChanges: [plan],
+    });
+    render(<SettlementPanel game={game} onQuarterChange={vi.fn()} />);
+    const publish = await screen.findByRole('button', { name: '发布本回合' });
+    await waitFor(() => expect(publish).toBeEnabled());
+    fireEvent.click(publish);
+    const review = screen.getByRole('region', { name: '发布前核对' });
+    expect(review).toHaveTextContent('1 格：设置 遭到破坏（下回合生效）');
+    expect(review).toHaveTextContent(
+      '税收贡献 0% · 生产贡献 -50% · 持续 4 回合 · 不遮蔽实时视野',
+    );
+    expect(publishSettlement).not.toHaveBeenCalled();
+    expect(saveSettlement).not.toHaveBeenCalled();
+  });
+
   it('replaces a previous round with a placeholder until the selected round arrives', async () => {
     const current = {
       ...draft,

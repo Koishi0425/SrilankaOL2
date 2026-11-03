@@ -187,9 +187,13 @@ it('only clears the submitted host field and carries the other field to the new 
   await waitFor(() =>
     expect(localStorage.getItem(draftKey('round-review', 'host'))).toBeNull(),
   );
-  const leaving = new Event('beforeunload', { cancelable: true });
-  window.dispatchEvent(leaving);
-  expect(leaving.defaultPrevented).toBe(false);
+  // Clearing storage precedes React's effect cleanup; wait for the resulting
+  // leave protection to settle rather than asserting within that interval.
+  await waitFor(() => {
+    const leaving = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(leaving);
+    expect(leaving.defaultPrevented).toBe(false);
+  });
 });
 
 it('keeps failed host submissions and offers changed-version drafts for copying only', async () => {
@@ -691,6 +695,254 @@ it('restores the whole local draft only against its matching server revision', a
   expect(screen.getByLabelText('具体政策')).toHaveValue(
     '本机尚未保存的长篇政策',
   );
+});
+
+it('keeps the unsubmitted warning after saving and reopening, exposes the formal copy, and clears it only when content matches', async () => {
+  let saved = structuredClone(formal);
+  vi.mocked(api.fetchMyRoundPolicy).mockImplementation(async () => saved);
+  vi.mocked(api.saveRoundPolicy).mockImplementation(async (_g, _q, input) => {
+    saved = {
+      ...saved,
+      revision: 'b'.repeat(64),
+      draftSections: input.sections,
+      sections: input.submit
+        ? input.sections.map((s) => ({
+            ...s,
+            status: 'Submitted',
+            reviewReason: '',
+          }))
+        : saved.sections,
+    };
+    return saved;
+  });
+  const warning = '上次版本已提交，当前草稿有尚未提交的修改。';
+  const page = render(playerView());
+  await screen.findByText(warning);
+  fireEvent.change(screen.getAllByLabelText('具体政策')[0]!, {
+    target: { value: '保存后尚未提交的新正文' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '保存整份草稿' }));
+  await screen.findByText('整份草稿已保存；正式提交内容尚未改变。');
+  expect(screen.getByText(warning)).toBeVisible();
+  page.unmount();
+  render(playerView());
+  await screen.findByText(warning);
+  expect(screen.getAllByLabelText('具体政策')[0]).toHaveValue(
+    '保存后尚未提交的新正文',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '查看已提交版本' }));
+  const copy = screen.getByRole('region', { name: '已提交版本' });
+  expect(within(copy).getByText('研究与内政')).toBeVisible();
+  expect(within(copy).queryByRole('textbox')).not.toBeInTheDocument();
+  expect(
+    within(copy).queryByText('保存后尚未提交的新正文'),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '收起已提交版本' }));
+  expect(screen.getAllByLabelText('具体政策')[0]).toHaveValue(
+    '保存后尚未提交的新正文',
+  );
+  expect(api.saveRoundPolicy).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '提交整份政策' }));
+  fireEvent.click(screen.getByRole('button', { name: '确认整份提交' }));
+  await screen.findByText('整份政策已正式提交。');
+  expect(screen.queryByText(warning)).not.toBeInTheDocument();
+});
+
+it('does not warn after submitting or reopening when the server returns the same map references in a different order', async () => {
+  const initial = {
+    ...base,
+    draftSections: [
+      {
+        ...section('one'),
+        refs: [
+          {
+            refKind: 'Target' as const,
+            objectType: 'Tile' as const,
+            objectId: 'east',
+            label: '东岸',
+          },
+          {
+            refKind: 'Target' as const,
+            objectType: 'Tile' as const,
+            objectId: 'west',
+            label: '西岸',
+          },
+        ],
+      },
+    ],
+  };
+  const submitted: RoundPolicy = {
+    ...formal,
+    sectionCount: 1,
+    draftSections: [
+      {
+        ...initial.draftSections[0]!,
+        refs: [...initial.draftSections[0]!.refs].reverse(),
+      },
+    ],
+    sections: initial.draftSections.map((s) => ({
+      ...s,
+      status: 'Submitted',
+      reviewReason: '',
+    })),
+  };
+  vi.mocked(api.fetchMyRoundPolicy).mockResolvedValue(initial);
+  vi.mocked(api.saveRoundPolicy).mockResolvedValue(submitted);
+  const page = render(playerView());
+  fireEvent.click(await screen.findByRole('button', { name: '提交整份政策' }));
+  fireEvent.click(screen.getByRole('button', { name: '确认整份提交' }));
+  await screen.findByText('整份政策已正式提交。');
+  const warning = '上次版本已提交，当前草稿有尚未提交的修改。';
+  expect(screen.queryByText(warning)).not.toBeInTheDocument();
+  page.unmount();
+  vi.mocked(api.fetchMyRoundPolicy).mockResolvedValue(submitted);
+  render(playerView());
+  await screen.findByDisplayValue('跨领域的具体政策');
+  expect(screen.queryByText(warning)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '移除关联：西岸' }));
+  expect(screen.getByText(warning)).toBeVisible();
+});
+
+it('compares content rather than review metadata, notices title and reference edits, and keeps writing help collapsed', async () => {
+  vi.mocked(api.fetchMyRoundPolicy).mockResolvedValue({
+    ...formal,
+    draftSections: [section('one', '研究与内政'), section('two', '外交与技术')],
+  });
+  const page = render(playerView());
+  const title = (await screen.findAllByLabelText('分项标题（可自拟）'))[0]!;
+  const warning = '上次版本已提交，当前草稿有尚未提交的修改。';
+  expect(screen.queryByText(warning)).not.toBeInTheDocument();
+  const help = screen.getByText('填写帮助').closest('details')!;
+  expect(help.open).toBe(false);
+  expect(screen.getByText('保存草稿不会提交给主持人。')).toBeVisible();
+  fireEvent.change(title, { target: { value: '修改标题但没有改正文' } });
+  expect(screen.getByText(warning)).toBeVisible();
+  fireEvent.change(title, { target: { value: formal.sections[0]!.title } });
+  expect(screen.queryByText(warning)).not.toBeInTheDocument();
+  page.rerender(
+    <DraftAccountProvider userId="player">
+      <RoundPolicyCenter
+        game={game}
+        seed={{
+          key: 1,
+          title: '外交地图目标',
+          category: 'Diplomacy',
+          ref: {
+            objectId: 'new-tile',
+            objectType: 'Tile',
+            refKind: 'Target',
+            label: '新目标',
+          },
+        }}
+      />
+    </DraftAccountProvider>,
+  );
+  expect(screen.getByText(warning)).toBeVisible();
+  fireEvent.click(screen.getAllByRole('button', { name: '移除此分项' })[2]!);
+  expect(screen.queryByText(warning)).not.toBeInTheDocument();
+});
+
+it('waits for an explicit repeated-category destination and scrolls to the chosen section without replacing text', async () => {
+  vi.mocked(api.fetchMyRoundPolicy).mockResolvedValue({
+    ...base,
+    draftSections: [section('one', '第一项正文'), section('two', '第二项正文')],
+  });
+  const consumed = vi.fn();
+  const page = render(
+    <RoundPolicyCenter game={game} onSeedConsumed={consumed} />,
+  );
+  const texts = await screen.findAllByLabelText('具体政策');
+  fireEvent.change(texts[1]!, { target: { value: '第二项继续编写的正文' } });
+  const second = texts[1]!.closest('article')!;
+  const scroll = vi.fn();
+  Object.defineProperty(second, 'scrollIntoView', { value: scroll });
+  page.rerender(
+    <RoundPolicyCenter
+      game={game}
+      onSeedConsumed={consumed}
+      seed={{
+        key: 7,
+        title: '目标计划',
+        category: 'Research',
+        ref: {
+          objectId: 'tile',
+          objectType: 'Tile',
+          refKind: 'Target',
+          label: '东岸',
+        },
+      }}
+    />,
+  );
+  expect(
+    screen.getByRole('region', { name: '选择地图目标分项' }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole('button', { name: '移除关联：东岸' }),
+  ).not.toBeInTheDocument();
+  expect(consumed).toHaveBeenCalledExactlyOnceWith(7);
+  const promptScroll = vi.fn();
+  Object.defineProperty(
+    screen.getByRole('region', { name: '选择地图目标分项' }),
+    'scrollIntoView',
+    { value: promptScroll },
+  );
+  await waitFor(() =>
+    expect(promptScroll).toHaveBeenCalledWith({ block: 'center' }),
+  );
+  expect(screen.getByRole('button', { name: '保存整份草稿' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '提交整份政策' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '加入分项 2：标题two' }));
+  expect(
+    within(second).getByRole('button', { name: '移除关联：东岸' }),
+  ).toBeVisible();
+  expect(
+    within(texts[0]!.closest('article')!).queryByRole('button', {
+      name: '移除关联：东岸',
+    }),
+  ).not.toBeInTheDocument();
+  expect(texts[1]).toHaveValue('第二项继续编写的正文');
+  await waitFor(() => expect(scroll).toHaveBeenCalledWith({ block: 'center' }));
+  expect(api.saveRoundPolicy).not.toHaveBeenCalled();
+});
+
+it('can cancel an ambiguous target or create a new section, and does not re-add a consumed target', async () => {
+  vi.mocked(api.fetchMyRoundPolicy).mockResolvedValue({
+    ...base,
+    draftSections: [section('one'), section('two')],
+  });
+  const incoming = {
+    key: 1,
+    title: '独立地图计划',
+    category: 'Research' as const,
+    ref: {
+      objectId: 'tile',
+      objectType: 'Tile' as const,
+      refKind: 'Target' as const,
+      label: '东岸',
+    },
+  };
+  const page = render(<RoundPolicyCenter game={game} seed={incoming} />);
+  fireEvent.click(await screen.findByRole('button', { name: '取消添加目标' }));
+  expect(
+    screen.queryByRole('region', { name: '选择地图目标分项' }),
+  ).not.toBeInTheDocument();
+  expect(screen.getAllByLabelText('具体政策')).toHaveLength(2);
+  page.rerender(
+    <RoundPolicyCenter game={game} seed={{ ...incoming, key: 2 }} />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '新建分项并加入' }));
+  expect(screen.getAllByLabelText('具体政策')).toHaveLength(3);
+  expect(screen.getByDisplayValue('独立地图计划')).toBeVisible();
+  expect(
+    screen.getAllByRole('button', { name: '移除关联：东岸' }),
+  ).toHaveLength(1);
+  fireEvent.change(screen.getAllByLabelText('具体政策')[2]!, {
+    target: { value: '新分项的正文' },
+  });
+  expect(
+    screen.queryByRole('region', { name: '选择地图目标分项' }),
+  ).not.toBeInTheDocument();
+  expect(screen.getAllByLabelText('具体政策')).toHaveLength(3);
 });
 
 it('keeps dirty text through polling and map targets append without replacing policy text', async () => {

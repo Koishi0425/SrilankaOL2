@@ -2946,6 +2946,51 @@ select:focus-visible {
 .round-policy-center .policy-guidance {
   line-height: 1.7;
 }
+.round-policy-center .policy-help {
+  margin: 8px 0;
+}
+.round-policy-center .policy-submission-notice {
+  padding: 8px 10px;
+  margin: 8px 0;
+  border-left: 3px solid #b77325;
+  background: #fff3d8;
+  color: #6b4218;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.policy-submitted-version {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+  background: #f5f7f4;
+}
+.policy-target-choice .quarter-actions {
+  padding: 0;
+  border-bottom: 0;
+}
+.policy-target-choice button {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.tile-range-preview {
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.tile-range-preview svg {
+  display: block;
+  width: 100%;
+  height: 220px;
+  background: #f5f7f4;
+}
+.tile-range-preview figcaption {
+  margin: 8px 0;
+}
 .round-policy-center .rules-text {
   overflow-wrap: anywhere;
 }

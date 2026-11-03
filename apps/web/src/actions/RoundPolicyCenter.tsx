@@ -25,7 +25,9 @@ import {
 import { ActionMapLinks } from '../map/ActionMapLinks.js';
 import { mergeActionRefs, statusNames } from './ActionCenter.js';
 import type { ActionCenter } from './ActionCenter.js';
+import type { ActionDraftSeed } from './ActionCenter.js';
 import { categories, categoryName } from './action-labels.js';
+import { samePolicySections } from './policy-sections.js';
 import {
   isLocalPolicy,
   policyDraftPreview,
@@ -86,6 +88,8 @@ export function RoundPolicyCenter({
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [confirm, setConfirm] = useState(false);
+  const [showSubmitted, setShowSubmitted] = useState(false);
+  const [targetSeed, setTargetSeed] = useState<ActionDraftSeed | null>(null);
   const generation = useRef(0);
   const pending = useRef(false);
   const reading = useRef(false);
@@ -96,6 +100,7 @@ export function RoundPolicyCenter({
   const handledFocus = useRef<number | undefined>(undefined);
   const handledSeed = useRef<number | undefined>(undefined);
   const cards = useRef(new Map<string, HTMLElement>());
+  const targetChoice = useRef<HTMLElement>(null);
   const local = useLocalDraft(
     useDraftKey(
       game.id,
@@ -179,6 +184,8 @@ export function RoundPolicyCenter({
     setDirty(false);
     setError('');
     setNotice('');
+    setShowSubmitted(false);
+    setTargetSeed(null);
     live.current = {
       policy: null,
       sections: [],
@@ -192,6 +199,41 @@ export function RoundPolicyCenter({
       generation.current++;
     };
   }, [game.id, quarter.id, game.role, refresh]);
+  function addTarget(incoming: ActionDraftSeed, sectionId?: string) {
+    if (!editable || !current || pending.current) return;
+    const next = [...live.current.sections];
+    let destination = sectionId
+      ? next.find((s) => s.id === sectionId)
+      : undefined;
+    if (sectionId && !destination) {
+      setError('该分项已移除，请重新选择目标分项。');
+      return;
+    }
+    if (destination) {
+      next[next.indexOf(destination)] = {
+        ...destination,
+        refs: mergeActionRefs(destination.refs, incoming.ref),
+      };
+    } else {
+      destination = {
+        ...newSection(),
+        title: incoming.title,
+        category: incoming.category ?? 'Policy',
+        refs: [incoming.ref],
+      };
+      next.push(destination);
+    }
+    change(next);
+    setError('');
+    setTargetSeed(null);
+    setNotice(
+      `已将“${incoming.ref.label}”加入“${destination.title || '未命名分项'}”，尚未正式提交。`,
+    );
+    const id = destination.id;
+    requestAnimationFrame(() =>
+      cards.current.get(id)?.scrollIntoView?.({ block: 'center' }),
+    );
+  }
   useEffect(() => {
     if (!active) return;
     void refresh();
@@ -322,29 +364,23 @@ export function RoundPolicyCenter({
       pending.current
     )
       return;
+    if (targetSeed) return;
     handledSeed.current = seed.key;
+    setConfirm(false);
     if (!editable || !current)
       setError(
         '当前政策不能编辑。请在当前回合开放提交或要求补充时添加地图目标。',
       );
     else {
-      const next = [...live.current.sections];
-      const index = next.findIndex(
+      const matches = live.current.sections.filter(
         (s) => s.category === (seed.category ?? 'Policy'),
       );
-      if (index >= 0)
-        next[index] = {
-          ...next[index]!,
-          refs: mergeActionRefs(next[index]!.refs, seed.ref),
-        };
-      else
-        next.push({
-          ...newSection(),
-          title: seed.title,
-          category: seed.category ?? 'Policy',
-          refs: [seed.ref],
-        });
-      change(next);
+      if (matches.length > 1) {
+        setTargetSeed(seed);
+        requestAnimationFrame(() =>
+          targetChoice.current?.scrollIntoView?.({ block: 'center' }),
+        );
+      } else addTarget(seed, matches[0]?.id);
     }
     onSeedConsumed?.(seed.key);
   });
@@ -375,7 +411,7 @@ export function RoundPolicyCenter({
     return id;
   }
   async function save(submit: boolean) {
-    if (!policy || !editable || pending.current) return;
+    if (!policy || !editable || pending.current || targetSeed) return;
     if (submit && (!sections.length || sections.some((s) => !s.text.trim()))) {
       setError('请填写各分项的具体政策，或移除空白分项后再整份提交。');
       return;
@@ -475,6 +511,10 @@ export function RoundPolicyCenter({
   }
   const shown =
     host || !policy?.draftSections ? (policy?.sections ?? []) : sections;
+  const hasUnsubmittedChanges =
+    !host &&
+    !!policy?.sections.length &&
+    !samePolicySections(sections, policy.sections);
   const reviewOpen =
     host &&
     !readOnly &&
@@ -657,13 +697,107 @@ export function RoundPolicyCenter({
                 回合
               </h4>
               <p>
+                {!host && policy.sections.length > 0 ? '正式版本：' : ''}
                 {statusName(policy)}
                 {dirty ? ' · 有未保存修改' : ''}
               </p>
-              {!host && (
-                <p className="policy-guidance">
-                  本回合只提交一份政策。请自行添加分项，在各项中填写具体政策，最后整份提交。分类只是写作提示，可以重复、组合或选择“自由行动”并自拟标题；每项可涉及多个领域，分类不限制政策内容或分项数量。政策结果向谁可见，由主持人在结算时根据内容决定。
+              {hasUnsubmittedChanges && (
+                <p className="policy-submission-notice" role="status">
+                  上次版本已提交，当前草稿有尚未提交的修改。
                 </p>
+              )}
+              {!host && policy.sections.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    aria-expanded={showSubmitted}
+                    onClick={() => setShowSubmitted((value) => !value)}
+                  >
+                    {showSubmitted ? '收起已提交版本' : '查看已提交版本'}
+                  </button>
+                  {showSubmitted && (
+                    <section
+                      className="policy-submitted-version"
+                      aria-label="已提交版本"
+                    >
+                      <h5>已提交给主持人的内容</h5>
+                      {policy.submittedAt && (
+                        <p>
+                          提交时间：
+                          {new Date(policy.submittedAt).toLocaleString('zh-CN')}
+                        </p>
+                      )}
+                      {policy.sections.map((section) => (
+                        <div key={section.id}>
+                          <h5>
+                            {section.title} · {categoryName(section.category)}
+                          </h5>
+                          <p className="rules-text">{section.text}</p>
+                          <ActionMapLinks
+                            refs={section.refs}
+                            onLocate={onLocateReference}
+                          />
+                        </div>
+                      ))}
+                    </section>
+                  )}
+                </>
+              )}
+              {!host && (
+                <>
+                  <p className="policy-guidance">保存草稿不会提交给主持人。</p>
+                  <details className="policy-help">
+                    <summary>填写帮助</summary>
+                    <p className="policy-guidance">
+                      本回合只提交一份政策。请自行添加分项，在各项中填写具体政策，最后整份提交。分类只是写作提示，可以重复、组合或选择“自由行动”并自拟标题；每项可涉及多个领域，分类不限制政策内容或分项数量。政策结果向谁可见，由主持人在结算时根据内容决定。
+                    </p>
+                  </details>
+                </>
+              )}
+              {!host && targetSeed && editable && (
+                <section
+                  className="draft-recovery policy-target-choice"
+                  aria-label="选择地图目标分项"
+                  ref={targetChoice}
+                >
+                  <h5>将“{targetSeed.ref.label}”加入哪个分项？</h5>
+                  <p>
+                    有多个分项使用“
+                    {categoryName(targetSeed.category ?? 'Policy')}
+                    ”分类，请选择归属，也可以新建分项。
+                  </p>
+                  <div className="quarter-actions">
+                    {sections
+                      .filter(
+                        (s) => s.category === (targetSeed.category ?? 'Policy'),
+                      )
+                      .map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          disabled={busy}
+                          onClick={() => addTarget(targetSeed, s.id)}
+                        >
+                          加入分项 {sections.indexOf(s) + 1}：
+                          {s.title || '未命名分项'}
+                        </button>
+                      ))}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => addTarget(targetSeed)}
+                    >
+                      新建分项并加入
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setTargetSeed(null)}
+                    >
+                      取消添加目标
+                    </button>
+                  </div>
+                </section>
               )}
               {policy.pendingInputRequest && (
                 <div className="draft-recovery">
@@ -733,12 +867,15 @@ export function RoundPolicyCenter({
                   >
                     添加政策分项
                   </button>
-                  <button disabled={busy} onClick={() => void save(false)}>
+                  <button
+                    disabled={busy || !!targetSeed}
+                    onClick={() => void save(false)}
+                  >
                     保存整份草稿
                   </button>
                   <button
                     className="button"
-                    disabled={busy || !policy.canSubmit}
+                    disabled={busy || !!targetSeed || !policy.canSubmit}
                     onClick={() => {
                       setConfirm(true);
                       setError('');
