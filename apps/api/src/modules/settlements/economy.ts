@@ -103,35 +103,37 @@ export function economicBillInput(bill: EconomicBill): EconomicBillInput {
     ),
   };
 }
-export async function captureEconomicSnapshot(
+export async function readEconomicSnapshot(
   db: DatabaseClient,
   gameId: string,
   quarterId: string,
+  options: {
+    rules?: EconomicRules;
+    lockGame?: boolean;
+    includeDisabled?: boolean;
+    seedBlankProvinces?: boolean;
+  } = {},
 ) {
-  // Quarter is already locked by opening submissions. Match map → game lock order.
-  await db.query('SELECT id FROM world_maps WHERE game_id=$1 FOR UPDATE', [
-    gameId,
-  ]);
   const game = (
     await db.query<{
       economic_rules: EconomicRules;
       economic_rules_revision: number;
       current_world_version: string;
     }>(
-      'SELECT economic_rules,economic_rules_revision,current_world_version FROM games WHERE id=$1 FOR UPDATE',
+      `SELECT economic_rules,economic_rules_revision,current_world_version FROM games WHERE id=$1${options.lockGame ? ' FOR UPDATE' : ''}`,
       [gameId],
     )
   ).rows[0]!;
   const snapshot: EconomicSnapshot = {
     capturedAt: new Date().toISOString(),
     worldVersion: Number(game.current_world_version),
-    rules: game.economic_rules,
+    rules: options.rules ?? game.economic_rules,
     rulesRevision: game.economic_rules_revision,
     countries: [],
     provinces: [],
     armies: [],
   };
-  if (snapshot.rules.enabled) {
+  if (snapshot.rules.enabled || options.includeDisabled) {
     snapshot.countries = (
       await db.query<{ id: string; name: string }>(
         "SELECT id,name FROM countries WHERE game_id=$1 AND status='Active' ORDER BY created_at,id",
@@ -146,6 +148,7 @@ export async function captureEconomicSnapshot(
         production_base: number;
         manpower_base: number;
         autonomy: string;
+        profile_revision: number;
       }>('SELECT * FROM provinces WHERE game_id=$1 ORDER BY name,id', [gameId])
     ).rows;
     const tiles = (
@@ -166,6 +169,12 @@ export async function captureEconomicSnapshot(
       grouped.set(tile.province_id, group);
     }
     snapshot.provinces = profiles.map((p) => {
+      const reference =
+        options.seedBlankProvinces &&
+        p.profile_revision === 0 &&
+        p.tax_base === 0 &&
+        p.production_base === 0 &&
+        p.manpower_base === 0;
       const group = grouped.get(p.id) ?? [],
         eligible = new Map<string, number>();
       for (const t of group)
@@ -180,9 +189,9 @@ export async function captureEconomicSnapshot(
       return {
         id: p.id,
         name: p.name,
-        taxBase: p.tax_base,
-        productionBase: p.production_base,
-        manpowerBase: p.manpower_base,
+        taxBase: reference ? 10 : p.tax_base,
+        productionBase: reference ? 10 : p.production_base,
+        manpowerBase: reference ? 100 : p.manpower_base,
         autonomy: Number(p.autonomy),
         tileCount: group.length,
         eligible: [...eligible].map(([countryId, tileCount]) => ({
@@ -227,6 +236,21 @@ export async function captureEconomicSnapshot(
       (p) => nationalPolicyStatus(p, sequence) === 'Active',
     );
   }
+  return snapshot;
+}
+
+export async function captureEconomicSnapshot(
+  db: DatabaseClient,
+  gameId: string,
+  quarterId: string,
+) {
+  // Quarter is already locked by opening submissions. Match map → game lock order.
+  await db.query('SELECT id FROM world_maps WHERE game_id=$1 FOR UPDATE', [
+    gameId,
+  ]);
+  const snapshot = await readEconomicSnapshot(db, gameId, quarterId, {
+    lockGame: true,
+  });
   await db.query(
     'UPDATE quarters SET economic_snapshot=$3::jsonb WHERE game_id=$1 AND id=$2 AND economic_snapshot IS NULL',
     [gameId, quarterId, JSON.stringify(snapshot)],

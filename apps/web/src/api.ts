@@ -60,6 +60,9 @@ import type {
   ProvinceData,
   SetProvinceInput,
   EconomicRulesData,
+  EconomicSetupPreview,
+  SaveOpeningEconomyInput,
+  EconomicRules,
   SetEconomicRulesInput,
   EconomicBill,
   TradeData,
@@ -212,6 +215,41 @@ export async function fetchEconomicRules(gameId: string, signal?: AbortSignal) {
     await apiRequest<EconomicRulesData>(`/games/${gameId}/economic-rules`, {
       signal,
     })
+  ).data;
+}
+
+export async function previewEconomicSetup(
+  gameId: string,
+  rules?: EconomicRules,
+  signal?: AbortSignal,
+  seedBlankProvinces = false,
+) {
+  return (
+    await apiRequest<EconomicSetupPreview>(
+      `/games/${gameId}/economic-rules/preview`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          ...(rules ? { rules } : {}),
+          ...(seedBlankProvinces ? { seedBlankProvinces } : {}),
+        }),
+        signal,
+      },
+    )
+  ).data;
+}
+export async function saveOpeningEconomy(
+  gameId: string,
+  input: SaveOpeningEconomyInput,
+) {
+  return (
+    await apiRequest<EconomicSetupPreview>(
+      `/games/${gameId}/preparation/economy`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      },
+    )
   ).data;
 }
 export async function saveEconomicRules(

@@ -33,6 +33,7 @@ import {
   fetchMyRoundPolicy,
   fetchRoundPolicy,
   fetchRoundPolicyForAction,
+  fetchAssistantStatus,
 } from '../api.js';
 import { GameWorkspace } from './GameWorkspace.js';
 vi.mock('../api.js', async (importOriginal) => ({
@@ -55,6 +56,7 @@ vi.mock('../api.js', async (importOriginal) => ({
   fetchMyRoundPolicy: vi.fn(),
   fetchRoundPolicy: vi.fn(),
   fetchRoundPolicyForAction: vi.fn(),
+  fetchAssistantStatus: vi.fn(),
 }));
 vi.mock('../map/HexMap.js', () => ({
   HexMap: ({
@@ -235,6 +237,14 @@ const roundPolicy = (a = action) => ({
 });
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(fetchAssistantStatus).mockResolvedValue({
+    configured: true,
+    enabled: true,
+    canManage: false,
+    scope: 'Global',
+    provider: 'compatible',
+    model: 'shared-model',
+  });
   vi.mocked(fetchRoundPolicies).mockResolvedValue([roundPolicy()]);
   vi.mocked(fetchMyRoundPolicy).mockResolvedValue(roundPolicy());
   vi.mocked(fetchRoundPolicy).mockResolvedValue(roundPolicy());
@@ -315,6 +325,35 @@ it('sends an explicit null when the host selects unassigned country', async () =
 });
 const nav = () =>
   within(screen.getByRole('navigation', { name: '游戏工作区' }));
+
+it.each(['Player', 'Host', 'Observer'] as const)(
+  'keeps an AI entry visible in the desktop workspace for %s',
+  async (role) => {
+    render(<GameWorkspace game={{ ...game, role }} />);
+    await screen.findByRole('navigation', { name: '游戏工作区' });
+    const entry = await nav().findByRole('button', { name: 'AI 辅助' });
+    fireEvent.click(entry);
+    expect(
+      await screen.findByRole('region', { name: 'AI 使用入口' }),
+    ).toBeInTheDocument();
+    expect(entry).toHaveAttribute('aria-pressed', 'true');
+  },
+);
+
+it('retains a message draft while checking the AI usage entry', async () => {
+  render(<GameWorkspace game={game} />);
+  await screen.findByRole('navigation', { name: '游戏工作区' });
+  fireEvent.click(await nav().findByRole('button', { name: /消息/ }));
+  fireEvent.change(screen.getByLabelText('测试消息草稿'), {
+    target: { value: '查看 AI 说明后继续写' },
+  });
+  fireEvent.click(nav().getByRole('button', { name: 'AI 辅助' }));
+  await screen.findByRole('region', { name: 'AI 使用入口' });
+  fireEvent.click(nav().getByRole('button', { name: /消息/ }));
+  expect(screen.getByLabelText('测试消息草稿')).toHaveValue(
+    '查看 AI 说明后继续写',
+  );
+});
 it('retains the chosen panel width across menus and restores it after expanded reading', async () => {
   render(<GameWorkspace game={game} />);
   await screen.findByRole('navigation', { name: '游戏工作区' });

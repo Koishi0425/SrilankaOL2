@@ -117,6 +117,10 @@ export function GlobalAssistantSettings({ onClose }: { onClose: () => void }) {
       <p>
         仅系统管理员可修改。保存并启用后，所有游戏中的玩家共用此服务；每次调用仍只发送该玩家有权查看的资料。
       </p>
+      <p>
+        使用入口：电脑工作区导航的“AI 辅助”，手机的“全部功能 → AI 辅助”。
+        其中可查看服务状态，并前往“起草反馈”或“结算速览”。
+      </p>
       {loading && !draft && <LoadingSkeleton label="正在读取配置…" />}
       {error && (
         <p role="alert" className="form-error">

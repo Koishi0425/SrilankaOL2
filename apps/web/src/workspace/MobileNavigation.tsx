@@ -4,6 +4,7 @@ export type WorkspacePage =
   | 'map'
   | 'actions'
   | 'messages'
+  | 'assistant'
   | 'rules'
   | 'settlement'
   | 'country'
@@ -143,6 +144,10 @@ export function MobileDirectory({
           </div>
           <h4>回合与规则</h4>
           <div className="mobile-feature-grid">
+            <button onClick={() => onNavigate('assistant')}>
+              <strong>AI 辅助</strong>
+              <span>结算速览、反馈起草与服务状态 →</span>
+            </button>
             {!readOnly && (
               <button onClick={onOverview}>
                 <strong>回合事务</strong>

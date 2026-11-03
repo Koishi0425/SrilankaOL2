@@ -3461,6 +3461,83 @@ select:focus-visible {
   width: 100%;
   margin-block: 8px;
 }
+.opening-balance-panel,
+.opening-balance-body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.opening-balance-body fieldset {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  margin: 0;
+  border: 1px solid var(--line);
+}
+.opening-reference-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.opening-reference-controls label,
+.opening-balance-body > fieldset > label:not(.check-row) {
+  display: grid;
+  gap: 5px;
+}
+.opening-balance-body .table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.opening-outlook-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.opening-outlook-table :is(th, td) {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  text-align: left;
+  min-width: 75px;
+}
+.opening-outlook-table input {
+  width: 110px;
+}
+.opening-outlook-table td:last-child {
+  min-width: 170px;
+}
+.preparation-advanced {
+  margin: 12px 0;
+}
+
+.assistant-home {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.assistant-home h4,
+.assistant-home p {
+  margin: 0;
+}
+.assistant-service-status,
+.assistant-entry {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.assistant-entry ol {
+  margin: 0;
+  padding-left: 22px;
+}
+.assistant-home button {
+  justify-self: start;
+}
+
 .assistant-panel,
 .assistant-settings {
   margin: 0.6rem 0;

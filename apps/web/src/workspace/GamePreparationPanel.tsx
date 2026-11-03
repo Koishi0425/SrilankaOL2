@@ -2,6 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import type { GamePreparation, QuarterSummary } from '@srilanka/contracts';
 import { fetchPreparation, openFirstQuarter } from '../api.js';
 import { LoadingSkeleton } from '../ui/LoadingSkeleton.js';
+import { lazyFeature } from '../ui/lazy-feature.js';
+
+const OpeningBalancePanel = lazyFeature(
+  async () => ({
+    default: (await import('./OpeningBalancePanel.js')).OpeningBalancePanel,
+  }),
+  '正在打开开局预算工具…',
+);
 
 export type PreparationTarget =
   'members' | 'rules' | 'map' | 'economy' | 'government';
@@ -21,6 +29,7 @@ export function GamePreparationPanel({
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [balanceDirty, setBalanceDirty] = useState(false);
   const pending = useRef(false);
   const requestVersion = useRef(0);
   useEffect(() => {
@@ -56,6 +65,10 @@ export function GamePreparationPanel({
 
   async function review() {
     if (pending.current) return;
+    if (balanceDirty) {
+      setError('请先保存或放弃开局资源与经济修改，再开放第一回合。');
+      return;
+    }
     pending.current = true;
     setBusy(true);
     ++requestVersion.current;
@@ -121,47 +134,66 @@ export function GamePreparationPanel({
               分配
             </button>
           </div>
-          <p className="muted">以下为可选设置，空白项按当前默认值开局。</p>
-          {(
-            [
-              ['rules', '剧本与规则', data.rulesSaved ? '已保存' : '尚未填写'],
+          <OpeningBalancePanel
+            gameId={gameId}
+            active={active}
+            disabled={busy || confirming}
+            onDirtyChange={setBalanceDirty}
+            onSaved={() => setRefresh((value) => value + 1)}
+          />
+          {balanceDirty && (
+            <p className="form-error">
+              开局预算有尚未保存的修改，请先保存或放弃修改。
+            </p>
+          )}
+          <details className="preparation-advanced">
+            <summary>更多开局设置：地图、规则与政府</summary>
+            <p className="muted">以下为可选设置，空白项按当前默认值开局。</p>
+            {(
               [
-                'map',
-                '地图',
-                data.map
-                  ? `${data.map.name} · ${data.map.tileCount} 格，${data.map.controlledTileCount} 格已有控制方`
-                  : '尚未创建',
-              ],
-              [
-                'economy',
-                '初始资源',
-                `${data.resourceCountryCount}/${data.countryCount} 国已调整余额，其余国库、人力为 0`,
-              ],
-              [
-                'rules',
-                '每季经济',
-                data.automaticEconomy ? '已启用自动账单' : '未启用自动账单',
-              ],
-              [
-                'government',
-                '政府资料',
-                `${data.governmentCountryCount}/${data.countryCount} 国已保存`,
-              ],
-            ] as const
-          ).map(([target, title, status]) => (
-            <div className="preparation-row" key={title}>
-              <div>
-                <strong>{title}</strong>
-                <p>{status}</p>
+                [
+                  'rules',
+                  '剧本与规则',
+                  data.rulesSaved ? '已保存' : '尚未填写',
+                ],
+                [
+                  'map',
+                  '地图',
+                  data.map
+                    ? `${data.map.name} · ${data.map.tileCount} 格，${data.map.controlledTileCount} 格已有控制方`
+                    : '尚未创建',
+                ],
+                [
+                  'economy',
+                  '初始资源',
+                  `${data.resourceCountryCount}/${data.countryCount} 国已调整余额，其余国库、人力为 0`,
+                ],
+                [
+                  'rules',
+                  '每季经济',
+                  data.automaticEconomy ? '已启用自动账单' : '未启用自动账单',
+                ],
+                [
+                  'government',
+                  '政府资料',
+                  `${data.governmentCountryCount}/${data.countryCount} 国已保存`,
+                ],
+              ] as const
+            ).map(([target, title, status]) => (
+              <div className="preparation-row" key={title}>
+                <div>
+                  <strong>{title}</strong>
+                  <p>{status}</p>
+                </div>
+                <button
+                  disabled={busy || confirming}
+                  onClick={() => onNavigate(target)}
+                >
+                  设置
+                </button>
               </div>
-              <button
-                disabled={busy || confirming}
-                onClick={() => onNavigate(target)}
-              >
-                设置
-              </button>
-            </div>
-          ))}
+            ))}
+          </details>
           {confirming ? (
             <div
               className="opening-confirmation"
@@ -194,7 +226,7 @@ export function GamePreparationPanel({
           ) : (
             <button
               className="button button--primary"
-              disabled={busy || !!error || !data.canOpen}
+              disabled={busy || !!error || !data.canOpen || balanceDirty}
               onClick={() => void review()}
             >
               {busy ? '正在读取…' : '开放第一回合'}

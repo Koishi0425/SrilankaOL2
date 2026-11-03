@@ -100,6 +100,89 @@ async function opening(gameId: string, cookie = hostCookie) {
   });
 }
 describe('new game and reviewed opening', () => {
+  it('previews and saves an opening budget through the host-only API before freezing the first snapshot', async () => {
+    const game = await create();
+    await assign(game.id);
+    const rules = {
+      enabled: true,
+      taxCoefficient: 1,
+      productionCoefficient: 1,
+      manpowerCoefficient: 1,
+      armyMaintenancePer100: 1,
+      administrationCost: 10,
+      tradeCoefficient: 0,
+    };
+    const preview = await app.inject({
+      method: 'POST',
+      url: `/api/v1/games/${game.id}/economic-rules/preview`,
+      headers: { cookie: hostCookie },
+      payload: { rules },
+    });
+    expect(preview.statusCode).toBe(200);
+    const data = preview.json().data;
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/games/${game.id}/economic-rules/preview`,
+          headers: { cookie: playerCookie },
+          payload: { rules },
+        })
+      ).statusCode,
+    ).toBe(403);
+    const payload = {
+      quarterId: data.quarterId,
+      expectedPreparationRevision: data.preparationRevision,
+      rules,
+      countries: data.countries.map((country: { id: string }) => ({
+        id: country.id,
+        treasury: 400,
+        manpower: 1000,
+      })),
+      reason: '开局试跑预算',
+    };
+    expect(
+      (
+        await app.inject({
+          method: 'PUT',
+          url: `/api/v1/games/${game.id}/preparation/economy`,
+          headers: { cookie: hostCookie },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (await games.getPreparation(game.id, hostId)).resourceCountryCount,
+    ).toBe(3);
+    expect(
+      (
+        await database.query(
+          'SELECT economic_snapshot FROM quarters WHERE id=$1',
+          [data.quarterId],
+        )
+      ).rows[0].economic_snapshot,
+    ).toBeNull();
+    expect((await opening(game.id)).statusCode).toBe(200);
+    expect(
+      (
+        await database.query(
+          'SELECT economic_snapshot FROM quarters WHERE id=$1',
+          [data.quarterId],
+        )
+      ).rows[0].economic_snapshot.rules,
+    ).toEqual(rules);
+    expect(
+      (
+        await app.inject({
+          method: 'PUT',
+          url: `/api/v1/games/${game.id}/preparation/economy`,
+          headers: { cookie: hostCookie },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(409);
+  });
+
   it('replays creation safely and preserves the single active game constraint', async () => {
     const payload = {
       name: '诸国时代',

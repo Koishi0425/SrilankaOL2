@@ -76,6 +76,12 @@ const CountryPanel = lazyFeature(
   }),
   '正在打开国家资料…',
 );
+const AssistantHome = lazyFeature(
+  async () => ({
+    default: (await import('../assistant/AssistantHome.js')).AssistantHome,
+  }),
+  '正在打开 AI 辅助…',
+);
 
 export function GameWorkspace({
   game,
@@ -110,6 +116,7 @@ export function GameWorkspace({
     | 'map'
     | 'actions'
     | 'messages'
+    | 'assistant'
     | 'rules'
     | 'settlement'
     | 'country'
@@ -227,7 +234,9 @@ export function GameWorkspace({
   function closePanel() {
     if (
       mobile &&
-      ['country', 'rules', 'members', 'preparation'].includes(workspaceTab)
+      ['country', 'rules', 'members', 'preparation', 'assistant'].includes(
+        workspaceTab,
+      )
     ) {
       setMobileMore(true);
       return;
@@ -264,6 +273,7 @@ export function GameWorkspace({
     map: '地图',
     actions: readOnly ? '政策记录' : canManage ? '行动审核' : '政策与行动',
     messages: '消息与讨论',
+    assistant: 'AI 辅助',
     rules: '剧本与规则',
     settlement: canManage && !readOnly ? '回合结算' : '回合结果',
     country: {
@@ -669,6 +679,15 @@ export function GameWorkspace({
                   )}
                 </button>
                 <button
+                  data-panel="assistant"
+                  onPointerEnter={AssistantHome.preload}
+                  onFocus={AssistantHome.preload}
+                  aria-pressed={workspaceTab === 'assistant'}
+                  onClick={() => setWorkspaceTab('assistant')}
+                >
+                  AI 辅助
+                </button>
+                <button
                   data-panel="rules"
                   aria-pressed={workspaceTab === 'rules'}
                   onClick={() => setWorkspaceTab('rules')}
@@ -802,9 +821,13 @@ export function GameWorkspace({
                 )}
                 <button aria-label="关闭面板" onClick={closePanel}>
                   {mobile &&
-                  ['country', 'rules', 'members', 'preparation'].includes(
-                    workspaceTab,
-                  )
+                  [
+                    'country',
+                    'rules',
+                    'members',
+                    'preparation',
+                    'assistant',
+                  ].includes(workspaceTab)
                     ? '返回全部功能'
                     : '返回地图'}
                 </button>
@@ -827,6 +850,13 @@ export function GameWorkspace({
                   event.currentTarget.scrollTop;
               }}
             >
+              {workspaceTab === 'assistant' && !loading && !previewMemberId && (
+                <AssistantHome
+                  game={{ ...game, currentQuarter }}
+                  onOpenSettlement={() => openSettlement()}
+                  onOpenRules={() => setWorkspaceTab('rules')}
+                />
+              )}
               {preparingOpening && (
                 <div hidden={workspaceTab !== 'preparation'}>
                   <GamePreparationPanel

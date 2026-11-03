@@ -261,6 +261,31 @@ export interface SetEconomicRulesInput {
   expectedVersion: number;
   reason: string;
 }
+export interface EconomicSetupPreview {
+  quarterId: string;
+  preparationRevision: string;
+  rules: EconomicRules;
+  rulesVersion: number;
+  worldVersion: number;
+  unconfiguredProvinceCount: number;
+  countries: Array<{
+    id: string;
+    name: string;
+    treasury: number;
+    manpower: number;
+    resourceRevision: number;
+    armyStrength: number;
+    lines: Array<Pick<EconomicLine, 'kind' | 'calculatedAmount' | 'sources'>>;
+  }>;
+}
+export interface SaveOpeningEconomyInput {
+  quarterId: string;
+  expectedPreparationRevision: string;
+  rules: EconomicRules;
+  countries: Array<{ id: string; treasury: number; manpower: number }>;
+  reason: string;
+  seedBlankProvinces?: boolean;
+}
 export type EconomicLineKind =
   | 'Tax'
   | 'Production'

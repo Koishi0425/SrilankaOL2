@@ -7,13 +7,20 @@ import {
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { GameDetails, GamePreparation } from '@srilanka/contracts';
-import { createGame, fetchPreparation, openFirstQuarter } from '../api.js';
+import {
+  createGame,
+  fetchPreparation,
+  openFirstQuarter,
+  previewEconomicSetup,
+} from '../api.js';
 import { GamePreparationPanel } from './GamePreparationPanel.js';
 import { NewGameForm } from './NewGameForm.js';
 vi.mock('../api.js', () => ({
   createGame: vi.fn(),
   fetchPreparation: vi.fn(),
   openFirstQuarter: vi.fn(),
+  previewEconomicSetup: vi.fn(),
+  saveOpeningEconomy: vi.fn(),
 }));
 const quarter = {
   id: 'quarter',
@@ -104,6 +111,58 @@ it('blocks opening only for unassigned players and links to their assignment', a
   expect(screen.getByRole('button', { name: '开放第一回合' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: '分配' }));
   expect(onNavigate).toHaveBeenCalledWith('members');
+});
+
+it('requires saving or discarding the visible opening budget before opening the quarter', async () => {
+  vi.mocked(previewEconomicSetup).mockResolvedValue({
+    quarterId: quarter.id,
+    preparationRevision: 'budget-revision',
+    rulesVersion: 0,
+    worldVersion: 0,
+    unconfiguredProvinceCount: 0,
+    rules: {
+      enabled: false,
+      taxCoefficient: 0,
+      productionCoefficient: 0,
+      manpowerCoefficient: 0,
+      armyMaintenancePer100: 0,
+      administrationCost: 0,
+      tradeCoefficient: 0,
+    },
+    countries: [
+      {
+        id: 'country',
+        name: '北国',
+        treasury: 0,
+        manpower: 0,
+        resourceRevision: 0,
+        armyStrength: 0,
+        lines: [],
+      },
+    ],
+  });
+  render(
+    <GamePreparationPanel
+      gameId="game"
+      active
+      onNavigate={vi.fn()}
+      onOpened={vi.fn()}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole('button', { name: '开局资源与平衡试算' }),
+  );
+  fireEvent.change(await screen.findByLabelText('北国 初始国库'), {
+    target: { value: '400' },
+  });
+  expect(screen.getByRole('button', { name: '开放第一回合' })).toBeDisabled();
+  expect(openFirstQuarter).not.toHaveBeenCalled();
+  fireEvent.click(
+    screen.getByRole('button', { name: '放弃本页修改并重新读取' }),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: '开放第一回合' })).toBeEnabled(),
+  );
 });
 it('reviews freshly saved settings and allows blank optional settings', async () => {
   const onOpened = vi.fn();
