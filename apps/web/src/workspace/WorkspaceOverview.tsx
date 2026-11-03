@@ -7,7 +7,7 @@ import type {
   QuarterSummary,
 } from '@srilanka/contracts';
 import { fetchActions, fetchNationalStatus, fetchGame } from '../api.js';
-import { statusNames } from '../actions/ActionCenter.js';
+import { statusNames } from '../actions/action-labels.js';
 
 export function useWorkspaceOverview(game: GameSummary, active: boolean) {
   const [national, setNational] = useState<NationalStatus | null>(null),

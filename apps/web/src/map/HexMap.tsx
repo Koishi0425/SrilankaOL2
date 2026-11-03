@@ -1,5 +1,12 @@
 import { TileTags } from './TileTags.js';
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import type {
   CountrySummary,
@@ -8,7 +15,6 @@ import type {
   MapObjectLocation,
   MapSearchResult,
   MapTileSummary,
-  MapViewportData,
   TileDetails,
 } from '@srilanka/contracts';
 
@@ -30,16 +36,17 @@ import {
   fitMap,
   fitTiles,
   screenToAxial,
-  splitViewport,
   visibleBounds,
   zoomAt,
   type ViewTransform,
 } from './hex-math.js';
-import { MapSetupPanel, type MapRevealSeed } from './MapSetupPanel.js';
+import type { MapRevealSeed } from './MapSetupPanel.js';
+import { lazyFeature } from '../ui/lazy-feature.js';
 import { MapHistory } from './MapHistory.js';
 import { MapLegend } from './MapLegend.js';
 import { TileContextPanel, type ProvinceScope } from './TileContextPanel.js';
 import type { MapActionIntent } from './map-actions.js';
+import { useMapViewport } from './useMapViewport.js';
 import {
   drawOccupation,
   drawTerrain,
@@ -50,6 +57,10 @@ import {
 } from './map-appearance.js';
 
 const HEX_SIZE = 27;
+const MapSetupPanel = lazyFeature(
+  async () => ({ default: (await import('./MapSetupPanel.js')).MapSetupPanel }),
+  '正在打开地图编辑…',
+);
 
 const discoveryStateNames: Record<MapTileSummary['discoveryState'], string> = {
   Unknown: '未知',
@@ -163,7 +174,6 @@ export function HexMap({
   const fittedScopeFocus = useRef<number | undefined>(undefined);
   const [metadata, setMetadata] = useState<MapMetadata | null>(null);
   const [missingMap, setMissingMap] = useState(false);
-  const [viewport, setViewport] = useState<MapViewportData | null>(null);
   const [selected, setSelected] = useState<TileDetails | null>(null);
   const [provinceScope, setProvinceScope] = useState<ProvinceScope>([]);
   const [view, setView] = useState<ViewTransform>({
@@ -313,8 +323,10 @@ export function HexMap({
   useEffect(() => {
     if (!active) return;
     let live = true;
+    let loading = false;
     const load = () => {
-      if (document.hidden) return;
+      if (document.hidden || loading) return;
+      loading = true;
       void fetchMap(game.id)
         .then((next) => {
           if (live) {
@@ -346,6 +358,9 @@ export function HexMap({
             return;
           }
           setError(reason instanceof Error ? reason.message : '地图尚未初始化');
+        })
+        .finally(() => {
+          loading = false;
         });
     };
     load();
@@ -415,51 +430,51 @@ export function HexMap({
       : raw;
   }, [metadata, size, view]);
 
-  useEffect(() => {
-    if (
-      !active ||
-      !metadata ||
-      bounds.minQ > bounds.maxQ ||
-      bounds.minR > bounds.maxR
-    )
-      return;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => {
-      void Promise.all(
-        splitViewport(bounds).map((part) =>
-          fetchMapViewport(game.id, part, controller.signal, previewMemberId),
-        ),
-      )
-        .then((parts) => {
-          if (!controller.signal.aborted && parts[0])
-            setViewport({
-              ...parts[0],
-              bounds,
-              tiles: parts.flatMap((part) => part.tiles),
-            });
-        })
-        .catch((reason: unknown) => {
-          if (
-            !controller.signal.aborted &&
-            !(reason instanceof DOMException && reason.name === 'AbortError')
-          ) {
-            setError(reason instanceof Error ? reason.message : '地图加载失败');
-          }
-        });
-    }, 100);
-    return () => {
-      window.clearTimeout(timeout);
-      controller.abort();
-    };
-  }, [active, bounds, game.id, metadata, previewMemberId, revision]);
+  const refreshViewport = useCallback(() => {
+    // Wait for fresh metadata before retrying chunks from a newer world version.
+    setMetadata(null);
+    setRevision((value) => value + 1);
+  }, []);
+  const viewport = useMapViewport({
+    active,
+    game,
+    metadata,
+    bounds,
+    previewMemberId,
+    countryId,
+    revision,
+    onError: setError,
+    onStale: refreshViewport,
+  });
 
+  const selectionContext = JSON.stringify([
+    game.id,
+    game.role,
+    previewMemberId,
+    metadata?.id,
+    metadata?.revision,
+    metadata?.currentWorldVersion,
+    metadata?.viewCountryId,
+  ]);
+  const selectedSnapshot = useRef<{ id: string; context: string } | null>(null);
+  function acceptSelected(tile: TileDetails) {
+    selectedSnapshot.current = { id: tile.id, context: selectionContext };
+    setSelected(tile);
+  }
   const selectedId = selected?.id;
   useEffect(() => {
     if (!active || !selectedId) return;
+    // Selection/search already fetched the details. Only a changed context needs
+    // another read, while this effect still cancels stale reads on selection changes.
+    if (
+      selectedSnapshot.current?.id === selectedId &&
+      selectedSnapshot.current.context === selectionContext
+    )
+      return;
     let live = true;
     void fetchTile(game.id, selectedId, previewMemberId)
       .then((tile) => {
-        if (live) setSelected(tile);
+        if (live) acceptSelected(tile);
       })
       .catch((cause: unknown) => {
         if (live)
@@ -468,12 +483,11 @@ export function HexMap({
     return () => {
       live = false;
     };
-  }, [active, game.id, selectedId, metadata, previewMemberId]);
+  }, [active, game.id, selectedId, selectionContext, previewMemberId]);
 
   useEffect(() => {
     ++selectionRequest.current;
     ++searchRequest.current;
-    setViewport(null);
     setSelected(null);
     setMovingArmy(null);
     setResults([]);
@@ -488,8 +502,10 @@ export function HexMap({
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = size.width * ratio;
-    canvas.height = size.height * ratio;
+    if (canvas.width !== Math.round(size.width * ratio))
+      canvas.width = Math.round(size.width * ratio);
+    if (canvas.height !== Math.round(size.height * ratio))
+      canvas.height = Math.round(size.height * ratio);
     const context = canvas.getContext('2d');
     if (!context) return;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -756,7 +772,7 @@ export function HexMap({
     try {
       const next = await fetchTile(game.id, tile.id, previewMemberId);
       if (request !== selectionRequest.current) return;
-      setSelected(next);
+      acceptSelected(next);
       onInspectTile?.();
       setError('');
     } catch (reason) {
@@ -812,7 +828,7 @@ export function HexMap({
         .then((tile) => {
           if (request === selectionRequest.current) {
             if (movingArmy) setDestination(tile);
-            else setSelected(tile);
+            else acceptSelected(tile);
             setError('');
             onInspectTile?.();
           }
@@ -874,7 +890,7 @@ export function HexMap({
     const request = ++selectionRequest.current;
     try {
       const tile = await action();
-      if (request === selectionRequest.current) setSelected(tile);
+      if (request === selectionRequest.current) acceptSelected(tile);
       setRevision((value) => value + 1);
       if (request === selectionRequest.current) setError('');
       return true;
@@ -928,6 +944,8 @@ export function HexMap({
           {canEdit && metadata && (
             <button
               aria-pressed={editing}
+              onPointerEnter={MapSetupPanel.preload}
+              onFocus={MapSetupPanel.preload}
               onClick={() => {
                 setEditing(!editing);
                 setMovingArmy(null);

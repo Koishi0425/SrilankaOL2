@@ -3,6 +3,8 @@ import {
   type FormEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -47,6 +49,7 @@ function appendMessages(
   current: ConversationMessage[],
   incoming: ConversationMessage[],
 ) {
+  if (!incoming.length) return current;
   const ids = new Set(incoming.map((message) => message.id));
   return [...current.filter((message) => !ids.has(message.id)), ...incoming];
 }
@@ -92,6 +95,7 @@ export function MessageCenter({
   }, [readOnly]);
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [contactMemberId, setContactMemberId] = useState('');
   const [error, setError] = useState('');
   const [connectionError, setConnectionError] = useState('');
@@ -108,14 +112,41 @@ export function MessageCenter({
   const retries = useRef(new Map<string, { content: string; id: string }>());
   const handledTarget = useRef<number | undefined>(undefined);
   const stream = useRef<HTMLDivElement>(null);
+  const historyRequest = useRef<number | null>(null);
+  const scrollAnchor = useRef<{
+    conversationId: string;
+    top: number;
+    height: number;
+  } | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const followLatest = useRef(true);
   const content = selected ? (drafts[selected.id] ?? '') : '';
   const sending = !!selected && sendingIds.includes(selected.id);
 
-  useEffect(() => {
-    if (active && followLatest.current && stream.current)
-      stream.current.scrollTop = stream.current.scrollHeight;
+  useLayoutEffect(() => {
+    const element = stream.current;
+    if (!active || !element) return;
+    const anchor = scrollAnchor.current;
+    if (anchor && anchor.conversationId === selectedId.current) {
+      element.scrollTop = anchor.top + element.scrollHeight - anchor.height;
+      scrollAnchor.current = null;
+    } else if (followLatest.current) {
+      element.scrollTop = element.scrollHeight;
+    }
   }, [active, messages]);
+
+  const messageBubbles = useMemo(
+    () =>
+      messages.map((message) => (
+        <article className="message-bubble" key={message.id}>
+          <strong>{message.senderDisplayName}</strong>
+          <p>{message.content}</p>
+          <small>{new Date(message.sentAt).toLocaleString()}</small>
+        </article>
+      )),
+    [messages],
+  );
 
   const load = useCallback(async () => {
     if (listBusy.current) return;
@@ -158,6 +189,9 @@ export function MessageCenter({
       const request = ++generation.current;
       selectedId.current = conversation.id;
       newestId.current = undefined;
+      historyRequest.current = null;
+      scrollAnchor.current = null;
+      setLoadingEarlier(false);
       followLatest.current = true;
       setSelected(conversation);
       setMessages([]);
@@ -232,7 +266,7 @@ export function MessageCenter({
         if (!after) setNextCursor(page.nextCursor);
         newestId.current = page.items.at(-1)?.id ?? after;
         setConnectionError('');
-        await load();
+        if (page.items.length) await load();
       } catch (cause) {
         if (!disposed)
           setConnectionError(
@@ -253,17 +287,37 @@ export function MessageCenter({
   }, [active, game.id, load, reading, selected]);
 
   async function loadEarlier() {
-    if (!selected || !nextCursor) return;
+    if (
+      !selected ||
+      !nextCursor ||
+      historyRequest.current === generation.current
+    )
+      return;
     const request = generation.current;
+    historyRequest.current = request;
+    setLoadingEarlier(true);
     followLatest.current = false;
     try {
       const page = await fetchMessages(game.id, selected.id, nextCursor);
       if (request !== generation.current) return;
+      const element = stream.current;
+      if (activeRef.current && element) {
+        scrollAnchor.current = {
+          conversationId: selected.id,
+          top: element.scrollTop,
+          height: element.scrollHeight,
+        };
+      }
       setMessages((current) => appendMessages(page.items, current));
       setNextCursor(page.nextCursor);
     } catch (cause) {
       if (request === generation.current)
         setError(cause instanceof Error ? cause.message : '更早消息加载失败');
+    } finally {
+      if (historyRequest.current === request) {
+        historyRequest.current = null;
+        setLoadingEarlier(false);
+      }
     }
   }
 
@@ -511,15 +565,19 @@ export function MessageCenter({
                 )}
               </div>
               {nextCursor && (
-                <button type="button" onClick={() => void loadEarlier()}>
-                  加载更早消息
+                <button
+                  type="button"
+                  disabled={loadingEarlier}
+                  onClick={() => void loadEarlier()}
+                >
+                  {loadingEarlier ? '正在加载更早消息…' : '加载更早消息'}
                 </button>
               )}
               <div
                 className="message-stream"
                 role="log"
                 aria-label="会话消息"
-                aria-busy={reading}
+                aria-busy={reading || loadingEarlier}
                 ref={stream}
                 onScroll={(event) => {
                   const element = event.currentTarget;
@@ -530,13 +588,7 @@ export function MessageCenter({
                     40;
                 }}
               >
-                {messages.map((message) => (
-                  <article className="message-bubble" key={message.id}>
-                    <strong>{message.senderDisplayName}</strong>
-                    <p>{message.content}</p>
-                    <small>{new Date(message.sentAt).toLocaleString()}</small>
-                  </article>
-                ))}
+                {messageBubbles}
                 {reading && (
                   <LoadingSkeleton
                     label="正在读取会话消息…"

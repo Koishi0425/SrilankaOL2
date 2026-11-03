@@ -8,7 +8,7 @@ import {
   ActionMapLinks,
   type MapActionReference,
 } from '../map/ActionMapLinks.js';
-import { discoveryNames } from '../map/MapSetupPanel.js';
+import { discoveryNames } from '../map/map-labels.js';
 import { StateChangeRecord } from './StateChangeEditor.js';
 import { RecruitmentRecord } from './RecruitmentEditor.js';
 import { BattleRecord, outcomeNames } from './BattleEditor.js';

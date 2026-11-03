@@ -9,13 +9,26 @@ import {
   fetchMe,
   logout,
 } from './api.js';
-import { GameWorkspace } from './workspace/GameWorkspace.js';
 import { NewGameForm } from './workspace/NewGameForm.js';
 import { DraftAccountProvider } from './drafts/local-drafts.js';
 import { gameStatusNames, roleNames, seasonNames } from './game-labels.js';
 import { LoginPanel, PasswordPanel } from './accounts/AccountPanels.js';
-import { GlobalAssistantSettings } from './assistant/GlobalAssistantSettings.js';
 import { LoadingSkeleton } from './ui/LoadingSkeleton.js';
+import { lazyFeature } from './ui/lazy-feature.js';
+
+const GameWorkspace = lazyFeature(
+  async () => ({
+    default: (await import('./workspace/GameWorkspace.js')).GameWorkspace,
+  }),
+  '正在打开游戏工作区…',
+);
+const GlobalAssistantSettings = lazyFeature(
+  async () => ({
+    default: (await import('./assistant/GlobalAssistantSettings.js'))
+      .GlobalAssistantSettings,
+  }),
+  '正在打开 AI 设置…',
+);
 
 type SessionState =
   | { kind: 'loading' }

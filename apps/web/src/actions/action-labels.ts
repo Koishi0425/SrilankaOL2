@@ -1,4 +1,20 @@
-import type { ActionCategory } from '@srilanka/contracts';
+import type { ActionCategory, ActionSummary } from '@srilanka/contracts';
+
+export const statusNames: Record<ActionSummary['status'], string> = {
+  Draft: '草稿',
+  Submitted: '已提交',
+  HostReview: '主持人审核中',
+  NeedPlayerInput: '需要补充',
+  AIStructuring: 'AI 整理中',
+  PendingHostApproval: '待主持人批准',
+  PendingPlayerConfirmation: '待玩家确认',
+  Approved: '已批准',
+  Rejected: '已拒绝',
+  Resolving: '结算中',
+  Completed: '已完成',
+  Withdrawn: '已撤回',
+  Invalidated: '已失效',
+};
 
 export const categories: Array<[ActionCategory, string]> = [
   ['Exploration', '探索'],

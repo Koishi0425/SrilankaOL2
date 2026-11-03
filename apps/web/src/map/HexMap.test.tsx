@@ -167,6 +167,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -175,6 +176,44 @@ async function ready() {
   await waitFor(() => expect(fetchMapViewport).toHaveBeenCalled());
   return screen.getByLabelText('交互地图：方向键平移，加减号缩放，0 查看全图');
 }
+
+it('does not queue overlapping metadata polls on a slow connection', async () => {
+  vi.useFakeTimers();
+  let resolve!: (value: MapMetadata) => void;
+  vi.mocked(fetchMap).mockImplementationOnce(
+    () => new Promise((done) => (resolve = done)),
+  );
+  render(<HexMap game={game} countries={[]} />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15_000);
+  });
+  fireEvent(document, new Event('visibilitychange'));
+  expect(fetchMap).toHaveBeenCalledTimes(1);
+  await act(async () => resolve(map));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(fetchMap).toHaveBeenCalledTimes(2);
+});
+
+it('waits for refreshed metadata before retrying a viewport from a newer world version', async () => {
+  let resolveMetadata!: (value: MapMetadata) => void;
+  vi.mocked(fetchMap)
+    .mockResolvedValueOnce(map)
+    .mockImplementationOnce(
+      () => new Promise((resolve) => (resolveMetadata = resolve)),
+    );
+  vi.mocked(fetchMapViewport).mockResolvedValue({
+    ...viewport,
+    worldVersion: 2,
+  });
+  render(<HexMap game={game} countries={[]} />);
+  await waitFor(() => expect(fetchMap).toHaveBeenCalledTimes(2));
+  expect(fetchMapViewport).toHaveBeenCalledTimes(1);
+  await act(async () => resolveMetadata({ ...map, currentWorldVersion: 2 }));
+  await waitFor(() => expect(fetchMapViewport).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
 
 it('keeps the whole map fitted during resize until the player zooms, then preserves the viewed location', async () => {
   let resize!: () => void;
@@ -384,6 +423,7 @@ it('switches map modes directly while retaining the inspected tile', async () =>
   clickTile(await ready(), origin);
   await screen.findByRole('heading', { name: '北境' });
   const loads = vi.mocked(fetchTile).mock.calls.length;
+  expect(loads).toBe(1);
   for (const mode of ['地形', '情报认知', '政治地图']) {
     fireEvent.click(screen.getByRole('button', { name: mode }));
     expect(screen.getByRole('button', { name: mode })).toHaveAttribute(
@@ -393,6 +433,21 @@ it('switches map modes directly while retaining the inspected tile', async () =>
     expect(screen.getByRole('heading', { name: '北境' })).toBeVisible();
   }
   expect(fetchTile).toHaveBeenCalledTimes(loads);
+});
+
+it('refreshes inspected tile details when the map revision changes', async () => {
+  render(<HexMap game={game} countries={[]} overlay />);
+  clickTile(await ready(), origin);
+  await screen.findByRole('heading', { name: '北境' });
+  expect(fetchTile).toHaveBeenCalledTimes(1);
+  vi.mocked(fetchMap).mockResolvedValue({ ...map, revision: 2 });
+  vi.mocked(fetchTile).mockResolvedValue({
+    ...origin,
+    regionName: '更新后的北境',
+  });
+  fireEvent(document, new Event('visibilitychange'));
+  await screen.findByRole('heading', { name: '更新后的北境' });
+  expect(fetchTile).toHaveBeenCalledTimes(2);
 });
 
 it('navigates map search results by keyboard and returns focus to the map after selection', async () => {

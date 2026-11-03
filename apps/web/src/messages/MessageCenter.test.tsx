@@ -70,11 +70,127 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.resetAllMocks();
   vi.useRealTimers();
 });
 
 describe('MessageCenter', () => {
+  it('does not refresh the conversation list for empty message polls', async () => {
+    vi.useFakeTimers();
+    render(<MessageCenter game={game} countries={[]} />);
+    await act(async () => {});
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: /北方探索/ })),
+    );
+    const initialLists = vi.mocked(fetchConversations).mock.calls.length;
+    const initialMessages = vi.mocked(fetchMessages).mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
+    expect(fetchMessages).toHaveBeenCalledTimes(initialMessages + 4);
+    // Unread badges still refresh every four seconds, including other conversations.
+    expect(fetchConversations).toHaveBeenCalledTimes(initialLists + 3);
+  });
+
+  it('preserves the reading position and prevents duplicate requests while loading older messages', async () => {
+    let resolveOlder!: (page: {
+      items: ConversationMessage[];
+      nextCursor: null;
+    }) => void;
+    vi.mocked(fetchMessages).mockImplementation(
+      async (_game, _conversation, cursor, after) => {
+        if (cursor) return new Promise((resolve) => (resolveOlder = resolve));
+        return {
+          items: after ? [] : [message('first')],
+          nextCursor: after ? null : 'first',
+        };
+      },
+    );
+    render(<MessageCenter game={game} countries={[]} />);
+    fireEvent.click(await screen.findByRole('button', { name: /北方探索/ }));
+    await screen.findByText('first');
+    const log = screen.getByRole('log');
+    Object.defineProperty(log, 'scrollHeight', {
+      configurable: true,
+      get: () => (log.textContent?.includes('older') ? 1200 : 1000),
+    });
+    Object.defineProperty(log, 'clientHeight', {
+      configurable: true,
+      value: 300,
+    });
+    log.scrollTop = 150;
+    fireEvent.scroll(log);
+    fireEvent.click(screen.getByRole('button', { name: '加载更早消息' }));
+    const pending = screen.getByRole('button', { name: '正在加载更早消息…' });
+    expect(pending).toBeDisabled();
+    fireEvent.click(pending);
+    expect(
+      vi.mocked(fetchMessages).mock.calls.filter((call) => call[2] === 'first'),
+    ).toHaveLength(1);
+    // Continue reading while the request is in flight; anchor the latest position.
+    log.scrollTop = 180;
+    await act(async () =>
+      resolveOlder({ items: [message('older')], nextCursor: null }),
+    );
+    expect(log.scrollTop).toBe(380);
+    expect(within(log).getByText('first')).toBeInTheDocument();
+  });
+
+  it('does not reformat the whole message history when typing a draft', async () => {
+    vi.mocked(fetchMessages).mockImplementation(
+      async (_game, _conversation, _cursor, after) => ({
+        items: after
+          ? []
+          : Array.from({ length: 100 }, (_, index) => message(`item-${index}`)),
+        nextCursor: null,
+      }),
+    );
+    const format = vi.spyOn(Date.prototype, 'toLocaleString');
+    render(<MessageCenter game={game} countries={[]} />);
+    fireEvent.click(await screen.findByRole('button', { name: /北方探索/ }));
+    await waitFor(() =>
+      expect(screen.getByLabelText('消息内容')).toBeEnabled(),
+    );
+    const initialFormats = format.mock.calls.length;
+    for (const value of ['正', '正在', '正在编写', '正在编写新消息']) {
+      fireEvent.change(screen.getByLabelText('消息内容'), {
+        target: { value },
+      });
+    }
+    expect(format).toHaveBeenCalledTimes(initialFormats);
+    expect(screen.getByLabelText('消息内容')).toHaveValue('正在编写新消息');
+  });
+
+  it('ignores older history that arrives after switching conversations', async () => {
+    let resolveOlder!: (page: {
+      items: ConversationMessage[];
+      nextCursor: null;
+    }) => void;
+    vi.mocked(fetchMessages).mockImplementation(
+      async (_game, conversation, cursor, after) => {
+        if (cursor) return new Promise((resolve) => (resolveOlder = resolve));
+        return {
+          items: after ? [] : [message(`first-${conversation}`, conversation)],
+          nextCursor: after ? null : 'first',
+        };
+      },
+    );
+    render(<MessageCenter game={game} countries={[]} />);
+    fireEvent.click(await screen.findByRole('button', { name: /北方探索/ }));
+    await screen.findByText('first-a');
+    fireEvent.click(screen.getByRole('button', { name: '加载更早消息' }));
+    fireEvent.click(screen.getByRole('button', { name: /主持人私聊/ }));
+    await screen.findByText('first-b');
+    await act(async () =>
+      resolveOlder({ items: [message('older-a')], nextCursor: null }),
+    );
+    expect(
+      within(screen.getByRole('log')).queryByText('older-a'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '加载更早消息' })).toBeEnabled();
+  });
+
   it('distinguishes a pending conversation list and message history from empty results', async () => {
     let resolveList!: (items: ConversationSummary[]) => void;
     vi.mocked(fetchConversations).mockReturnValueOnce(

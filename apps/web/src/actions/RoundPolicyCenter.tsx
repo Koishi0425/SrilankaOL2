@@ -23,10 +23,10 @@ import {
   useLocalDraft,
 } from '../drafts/local-drafts.js';
 import { ActionMapLinks } from '../map/ActionMapLinks.js';
-import { mergeActionRefs, statusNames } from './ActionCenter.js';
+import { mergeActionRefs } from './action-refs.js';
 import type { ActionCenter } from './ActionCenter.js';
 import type { ActionDraftSeed } from './ActionCenter.js';
-import { categories, categoryName } from './action-labels.js';
+import { categories, categoryName, statusNames } from './action-labels.js';
 import { samePolicySections } from './policy-sections.js';
 import {
   isLocalPolicy,

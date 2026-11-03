@@ -33,7 +33,10 @@ import {
   updateAction,
   withdrawAction,
 } from '../api.js';
-import { categories, categoryName } from './action-labels.js';
+import { categories, categoryName, statusNames } from './action-labels.js';
+import { mergeActionRefs } from './action-refs.js';
+export { statusNames } from './action-labels.js';
+export { mergeActionRefs } from './action-refs.js';
 import {
   DraftRecovery,
   priorPolicyDraftKey,
@@ -102,19 +105,6 @@ function isPolicyDraft(value: unknown): value is PolicyLocalDraft {
   );
 }
 
-export function mergeActionRefs(
-  current: DraftRef[],
-  incoming: DraftRef,
-): DraftRef[] {
-  const duplicate = current.some(
-    (ref) =>
-      ref.refKind === incoming.refKind &&
-      ref.objectType === incoming.objectType &&
-      ref.objectId === incoming.objectId,
-  );
-  return duplicate ? current : [...current, incoming];
-}
-
 export function applyMapSeedToDraft(
   current: {
     title: string;
@@ -148,22 +138,6 @@ export function editableFieldsFromVersion(version: ActionVersion) {
     secrecy: version.secrecy,
   };
 }
-
-export const statusNames: Record<ActionSummary['status'], string> = {
-  Draft: '草稿',
-  Submitted: '已提交',
-  HostReview: '主持人审核中',
-  NeedPlayerInput: '需要补充',
-  AIStructuring: 'AI 整理中',
-  PendingHostApproval: '待主持人批准',
-  PendingPlayerConfirmation: '待玩家确认',
-  Approved: '已批准',
-  Rejected: '已拒绝',
-  Resolving: '结算中',
-  Completed: '已完成',
-  Withdrawn: '已撤回',
-  Invalidated: '已失效',
-};
 
 const secrecyNames: Record<ActionSecrecy, string> = {
   OwnerOnly: '仅本国与主持人',

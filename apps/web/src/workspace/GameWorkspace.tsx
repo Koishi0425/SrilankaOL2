@@ -26,7 +26,6 @@ import {
   locateMapReference,
 } from '../api.js';
 import { type ActionDraftSeed } from '../actions/ActionCenter.js';
-import { RoundPolicyCenter } from '../actions/RoundPolicyCenter.js';
 import { HexMap } from '../map/HexMap.js';
 import { mapActionSeed, type MapActionIntent } from '../map/map-actions.js';
 import type { MapActionReference } from '../map/ActionMapLinks.js';
@@ -37,11 +36,8 @@ import {
 } from '../messages/MessageCenter.js';
 import { GameRulesPanel } from '../rules/GameRulesPanel.js';
 import { EconomicRulesPanel } from '../rules/EconomicRulesPanel.js';
-import { SettlementPanel } from '../settlements/SettlementPanel.js';
-import {
-  CountryPanel,
-  type CountrySection,
-} from '../countries/CountryPanel.js';
+import type { CountrySection } from '../countries/CountryPanel.js';
+import { lazyFeature } from '../ui/lazy-feature.js';
 import { quarterStateNames, roleNames, seasonNames } from '../game-labels.js';
 import { TurnOverview, useWorkspaceOverview } from './WorkspaceOverview.js';
 import {
@@ -59,6 +55,28 @@ import {
   MobileDirectory,
   type WorkspacePage,
 } from './MobileNavigation.js';
+
+const RoundPolicyCenter = lazyFeature(
+  async () => ({
+    default: (await import('../actions/RoundPolicyCenter.js'))
+      .RoundPolicyCenter,
+  }),
+  '正在打开政策…',
+);
+const SettlementPanel = lazyFeature(
+  async () => ({
+    default: (await import('../settlements/SettlementPanel.js'))
+      .SettlementPanel,
+  }),
+  '正在打开回合结算…',
+);
+const CountryPanel = lazyFeature(
+  async () => ({
+    default: (await import('../countries/CountryPanel.js')).CountryPanel,
+  }),
+  '正在打开国家资料…',
+);
+
 export function GameWorkspace({
   game,
   onGameChange,
@@ -572,6 +590,8 @@ export function GameWorkspace({
                 <div className="strategy-country-menu">
                   <button
                     data-panel="overview"
+                    onPointerEnter={CountryPanel.preload}
+                    onFocus={CountryPanel.preload}
                     aria-pressed={
                       workspaceTab === 'country' &&
                       countrySection === 'overview'
@@ -592,6 +612,8 @@ export function GameWorkspace({
                     <button
                       key={section}
                       data-panel={section}
+                      onPointerEnter={CountryPanel.preload}
+                      onFocus={CountryPanel.preload}
                       aria-pressed={
                         workspaceTab === 'country' && countrySection === section
                       }
@@ -611,6 +633,8 @@ export function GameWorkspace({
                 {game.role !== 'Observer' && (
                   <button
                     data-panel="actions"
+                    onPointerEnter={RoundPolicyCenter.preload}
+                    onFocus={RoundPolicyCenter.preload}
                     aria-pressed={workspaceTab === 'actions'}
                     onClick={() => {
                       setActionsOpened(true);
@@ -622,6 +646,8 @@ export function GameWorkspace({
                 )}
                 <button
                   data-panel="settlement"
+                  onPointerEnter={SettlementPanel.preload}
+                  onFocus={SettlementPanel.preload}
                   aria-pressed={workspaceTab === 'settlement'}
                   onClick={() => openSettlement()}
                 >

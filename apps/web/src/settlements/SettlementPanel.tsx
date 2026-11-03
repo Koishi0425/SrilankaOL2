@@ -44,7 +44,7 @@ import {
   ActionMapLinks,
   type MapActionReference,
 } from '../map/ActionMapLinks.js';
-import { discoveryNames } from '../map/MapSetupPanel.js';
+import { discoveryNames } from '../map/map-labels.js';
 import { StateChangeEditor, StateChangeRecord } from './StateChangeEditor.js';
 import { ResourceEditor } from './ResourceEditor.js';
 import {
@@ -391,8 +391,10 @@ export function SettlementPanel({
       return;
     let live = true;
     const quarterId = data.quarter.id;
+    let reading = false;
     const timer = window.setInterval(() => {
-      if (document.hidden) return;
+      if (document.hidden || reading) return;
+      reading = true;
       const request = generation.current;
       void Promise.all([
         fetchSettlement(game.id, quarterId),
@@ -409,7 +411,10 @@ export function SettlementPanel({
             setRounds(list);
           }
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => {
+          reading = false;
+        });
     }, 5000);
     return () => {
       live = false;

@@ -19,6 +19,8 @@ import {
 
 import { TileTagFields, emptyTileTag } from './TileTags.js';
 import { MapGenerator } from './MapGenerator.js';
+import { discoveryNames } from './map-labels.js';
+export { discoveryNames } from './map-labels.js';
 
 export interface MapRevealSeed {
   key: number;
@@ -27,12 +29,6 @@ export interface MapRevealSeed {
   countryId: string;
   tileIds: string[];
 }
-export const discoveryNames: Record<DiscoveryState, string> = {
-  Unknown: '清除记录',
-  Mapped: '地理信息',
-  Observed: '侦察情报',
-};
-
 export function MapSetupPanel({
   correctionReason,
   game,

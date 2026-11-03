@@ -132,9 +132,55 @@ beforeEach(() => {
     },
   ]);
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe('settlement writing and publication', () => {
+  it('waits for a slow report refresh to finish before polling again', async () => {
+    vi.useFakeTimers();
+    const published: QuarterSettlement = {
+      ...draft,
+      publishedAt: '2026-11-03T00:00:00Z',
+      quarter: { ...draft.quarter, state: 'Published' },
+    };
+    vi.mocked(fetchSettlement).mockResolvedValue(published);
+    vi.mocked(fetchSettlements).mockResolvedValue([
+      {
+        quarterId: published.quarter.id,
+        gameYear: 1,
+        season: 'Spring',
+        sequenceNumber: 1,
+        state: 'Published',
+        isCurrent: true,
+        publishedAt: published.publishedAt,
+      },
+    ]);
+    render(
+      <SettlementPanel
+        game={{ ...game, role: 'Player', currentQuarter: published.quarter }}
+        onQuarterChange={() => undefined}
+      />,
+    );
+    await act(async () => {});
+    const initial = vi.mocked(fetchSettlement).mock.calls.length;
+    expect(initial).toBeGreaterThan(0);
+    let resolve!: (value: QuarterSettlement) => void;
+    vi.mocked(fetchSettlement).mockImplementationOnce(
+      () => new Promise((done) => (resolve = done)),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(fetchSettlement).toHaveBeenCalledTimes(initial + 1);
+    await act(async () => resolve(published));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(fetchSettlement).toHaveBeenCalledTimes(initial + 2);
+  });
+
   it('saves the first tile-state plan with its loaded map revision while preserving a dirty public report', async () => {
     const initial = { ...draft, mapRevision: 7, stateChanges: [] };
     vi.mocked(fetchSettlement).mockResolvedValue(initial);
